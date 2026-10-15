@@ -82,6 +82,26 @@ class ColumnConfig(BaseConfig):
 
 
 @dataclass
+class DimensionValueMapping(dbtClassMixin):
+    """A final-output lookup into a display-only semantic model."""
+
+    semantic_model: str
+    value_dimension: str
+    display_dimension: str
+
+    def __post_init__(self) -> None:
+        for value in (self.semantic_model, self.value_dimension, self.display_dimension):
+            if type(value) is not str or not value.strip():
+                raise ValueError("Mapping references must be non-empty strings")
+
+    @classmethod
+    def __pre_deserialize__(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        # Validate before mashumaro can coerce raw identifiers to strings.
+        cls.validate(data)
+        return data
+
+
+@dataclass
 class ColumnDimension(dbtClassMixin):
     """Used for column-based dimensions for Semantic Models"""
 
@@ -97,6 +117,7 @@ class ColumnDimension(dbtClassMixin):
     is_partition: bool = False
     config: Dict[str, Any] = field(default_factory=dict)
     validity_params: Optional[ColumnDimensionValidityParams] = None
+    value_mapping: Optional[DimensionValueMapping] = None
 
 
 @dataclass

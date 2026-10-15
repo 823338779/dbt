@@ -21,7 +21,11 @@ from metricflow_semantic_interfaces.type_enums import (
 
 from dbt.artifacts.resources import SourceFileMetadata
 from dbt.artifacts.resources.base import GraphResource
-from dbt.artifacts.resources.v1.components import DependsOn, RefArgs
+from dbt.artifacts.resources.v1.components import (
+    DependsOn,
+    DimensionValueMapping,
+    RefArgs,
+)
 from dbt.artifacts.resources.v1.metric import Metric
 from dbt.artifacts.resources.v1.semantic_layer_components import (
     MeasureAggregationParameters,
@@ -90,6 +94,7 @@ class Dimension(dbtClassMixin):
     metadata: Optional[SourceFileMetadata] = None
     config: Optional[SemanticLayerElementConfig] = None
     datatype: Optional[DataType] = None
+    value_mapping: Optional[DimensionValueMapping] = None
 
     @property
     def reference(self) -> DimensionReference:

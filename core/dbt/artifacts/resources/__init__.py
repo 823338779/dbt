@@ -17,6 +17,7 @@ from dbt.artifacts.resources.v1.components import (
     Contract,
     DeferRelation,
     DependsOn,
+    DimensionValueMapping,
     FreshnessThreshold,
     HasRelationMetadata,
     InjectedCTE,

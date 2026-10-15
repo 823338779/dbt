@@ -19,6 +19,7 @@ from dbt.artifacts.resources import (
     ConstantPropertyInput,
     Defaults,
     DimensionValidityParams,
+    DimensionValueMapping,
     Docs,
     ExposureType,
     ExternalTable,
@@ -154,6 +155,7 @@ class UnparsedDimensionBase(dbtClassMixin):
     label: Optional[str] = None
     is_partition: bool = False
     config: Dict[str, Any] = field(default_factory=dict)
+    value_mapping: Optional[DimensionValueMapping] = None
 
 
 @dataclass

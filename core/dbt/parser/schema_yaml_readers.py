@@ -766,6 +766,7 @@ class SemanticModelParser(YamlReader):
                     is_partition=unparsed.is_partition,
                     type_params=self._get_dimension_type_params(unparsed=unparsed.type_params),
                     expr=unparsed.expr,
+                    value_mapping=unparsed.value_mapping,
                     metadata=None,  # TODO: requires a fair bit of parsing context
                     config=SemanticLayerElementConfig(meta=unparsed.config.get("meta", {})),
                 )
@@ -943,6 +944,7 @@ class SemanticModelParser(YamlReader):
                         config=config,
                         # optional fields
                         label=column.dimension.label,
+                        value_mapping=column.dimension.value_mapping,
                         is_partition=column.dimension.is_partition,
                         type_params=type_params,
                         metadata=None,  # Not yet supported in v1 or v2 YAML
@@ -985,6 +987,7 @@ class SemanticModelParser(YamlReader):
                     type_params=type_params,
                     # fields unique to derived dimensions
                     expr=derived_dimension.expr,
+                    value_mapping=derived_dimension.value_mapping,
                 )
             )
         return dimensions

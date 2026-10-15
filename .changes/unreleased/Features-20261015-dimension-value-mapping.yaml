@@ -1,0 +1,3 @@
+kind: Features
+body: Preserve native dimension value_mapping configuration in v1/v2 semantic models, manifests, and partial parsing for the vendored MetricFlow display mapping extension.
+time: 2026-10-15T00:00:00.000000+00:00
