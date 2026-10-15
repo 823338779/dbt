@@ -1,18 +1,41 @@
 import pytest
-from dbt_common.dataclass_schema import ValidationError
 from metricflow_semantic_interfaces.implementations.elements.dimension import (
     PydanticDimension,
 )
 
 from dbt.artifacts.resources import ColumnDimension, ColumnInfo, Dimension
-from dbt.contracts.graph.unparsed import UnparsedDerivedDimensionV2, UnparsedDimension
+from dbt.contracts.graph.unparsed import (
+    UnparsedColumn,
+    UnparsedDerivedDimensionV2,
+    UnparsedDimension,
+)
+from dbt.parser.common import ParserRef
 from dbt.parser.schema_yaml_readers import SemanticModelParser
+from dbt_common.dataclass_schema import ValidationError
 
 MAPPING = {
     "semantic_model": "status_codes",
     "value_dimension": "raw_value",
     "display_dimension": "display_value",
 }
+
+
+def test_column_yaml_preserves_mapping_through_parser_ref():
+    """Exercise the YAML-to-ColumnInfo step before semantic dimension parsing."""
+    column = UnparsedColumn.from_dict(
+        {
+            "name": "code",
+            "dimension": {"name": "status", "type": "categorical", "value_mapping": MAPPING},
+        }
+    )
+    refs = ParserRef()
+    refs._add(column)
+    parsed_column = refs.column_info["code"]
+    assert parsed_column.to_dict()["dimension"]["value_mapping"] == MAPPING
+    parser = object.__new__(SemanticModelParser)
+    dimension = parser._parse_v2_column_dimensions(refs.column_info)[0]
+    assert dimension.to_dict()["value_mapping"] == MAPPING
+    assert dimension.expr == "code"
 
 
 @pytest.mark.parametrize("kind", ["v1", "column", "derived"])

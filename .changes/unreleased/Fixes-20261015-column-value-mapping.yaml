@@ -1,0 +1,3 @@
+kind: Fixes
+body: Preserve value_mapping when converting v2 YAML column dimensions into ColumnInfo before semantic model parsing.
+time: 2026-10-15T00:00:00.000000+00:00

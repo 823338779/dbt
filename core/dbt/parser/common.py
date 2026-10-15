@@ -238,6 +238,7 @@ class ParserRef:
                     type=(DimensionType(column.dimension.type)),
                     description=column.dimension.description or column.description,
                     label=column.dimension.label,
+                    value_mapping=column.dimension.value_mapping,
                     is_partition=column.dimension.is_partition,
                     config=column.dimension.config or {},
                     validity_params=(
