@@ -1,0 +1,11 @@
+name: core_workflow
+version: '1.0.0'
+config-version: 2
+profile: core_workflow
+
+model-paths: [models]
+seed-paths: [seeds]
+
+models:
+  core_workflow:
+    +materialized: table
