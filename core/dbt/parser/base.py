@@ -63,6 +63,7 @@ class BaseParser(Generic[FinalValue]):
         """Returns a unique identifier for a resource
         An optional hash may be passed in to ensure uniqueness for edge cases"""
 
+        # 普通模型例如 model.custom_test_dbt.mart_people；与文件标识、FQN 是不同概念。
         return ".".join(
             filter(None, [self.resource_type, self.project.project_name, resource_name, hash])
         )
@@ -181,6 +182,7 @@ class ConfiguredParser(
         """Get the FQN for the node. This impacts node selection and config
         application.
         """
+        # 项目名 + 相对目录层级 + 资源名，用于配置匹配和资源选择，不是磁盘绝对路径。
         fqn = self.get_fqn_prefix(path)
         fqn.append(name)
         return fqn
@@ -226,6 +228,7 @@ class ConfiguredParser(
         config() and any ref()/source() calls discovered during rendering.
         """
         if name is None:
+            # mart_people.sql 默认得到 mart_people；还可由调用方显式传入名称。
             name = block.name
         language: Union[ModelLanguage, FunctionLanguage]
         if block.path.relative_path.endswith(".py"):
@@ -236,6 +239,8 @@ class ConfiguredParser(
             # this is not ideal but we have a lot of tests to adjust if don't do it
             language = ModelLanguage.sql
 
+        # 汇总已有文件信息与初始配置，创建节点骨架；raw_code 仍保留 ref 等 Jinja 调用。
+        # alias、schema、database 是初始值，后续配置更新可能改变它们。
         dct = {
             "alias": name,
             "schema": self.default_schema,
@@ -261,6 +266,8 @@ class ConfiguredParser(
             dct["returns"] = {"data_type": "INVALID_TYPE"}
 
         try:
+            # self 仍是具体解析器；ModelParser 会校验字典并生成 ModelNode。
+            # 此时尚未执行 render_update，也没有通过 add_result_node 登记到 Manifest。
             return self.parse_from_dict(dct, validate=True)
         except ValidationError as exc:
             # this is a bit silly, but build an UnparsedNode just for error
@@ -284,6 +291,7 @@ class ConfiguredParser(
 
         # this goes through the process of rendering, but just throws away
         # the rendered result. The "macro capture" is the point?
+        # parse 阶段渲染用于收集引用和配置，不把该返回文本作为最终 compiled_code 保存。
         get_rendered(parsed_node.raw_code, context, parsed_node, capture_macros=True)
         return context
 
@@ -358,6 +366,7 @@ class ConfiguredParser(
         ):
             if "materialized" not in patch_config_dict:
                 patch_config_dict["materialized"] = "table"
+        # SQL 中没有 config() 也仍会应用 dbt_project.yml 配置；后续 YAML 阶段还可补充配置。
         config_dict = config.build_config_dict(patch_config_dict=patch_config_dict)
 
         # Set tags on node provided in config blocks. Tags are additive, so even if
@@ -469,6 +478,7 @@ class ConfiguredParser(
             get_rendered(hook.sql, context, parsed_node, capture_macros=True)
 
     def initial_config(self, fqn: List[str]) -> ContextConfig:
+        # 准备用于计算配置的上下文，并非最终 ModelConfig 对象。
         config_version = min([self.project.config_version, self.root_project.config_version])
         if config_version == 2:
             return ContextConfig(
@@ -503,12 +513,14 @@ class ConfiguredParser(
             raise ConfigUpdateError(exc, node=node) from exc
 
     def add_result_node(self, block: FileBlock, node: ManifestNode):
+        # 启用的节点进入正常资源集合，禁用节点单独记录；这里不执行 SQL，也不写磁盘文件。
         if node.config.enabled:
             self.manifest.add_node(block.file, node)
         else:
             self.manifest.add_disabled(block.file, node)
 
     def parse_node(self, block: ConfiguredBlockType) -> FinalNode:
+        # ModelParser 返回相对于模型扫描目录的路径；compiled_path 只是名称，不代表已编译。
         compiled_path: str = self.get_compiled_path(block)
         fqn = self.get_fqn(compiled_path, block.name)
 
@@ -520,7 +532,9 @@ class ConfiguredParser(
             config=config,
             fqn=fqn,
         )
+        # 动态调用具体解析器实现；ModelParser 可用静态提取补充引用，无需完整渲染模型 SQL。
         self.render_update(node, config)
+        # 登记的是同一个节点对象；YAML 属性补充和最终 ref 依赖解析仍在后续阶段。
         self.add_result_node(block, node)
         return node
 
@@ -551,6 +565,7 @@ class SimpleParser(
 
 class SQLParser(ConfiguredParser[FileBlock, FinalNode], Generic[FinalNode]):
     def parse_file(self, file_block: FileBlock) -> None:
+        # ModelParser 继承此方法，self 仍为 ModelParser；结果通过共享 Manifest 的修改保留。
         self.parse_node(file_block)
 
 

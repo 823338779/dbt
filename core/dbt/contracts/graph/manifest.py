@@ -1756,12 +1756,14 @@ class Manifest(MacroMethods, dbtClassMixin):
 
     # Methods that were formerly in ParseResult
     def add_macro(self, source_file: SourceFile, macro: Macro) -> None:
+        # 按宏唯一 ID 保存定义，重复 ID 报错；登记宏不等于执行宏。
         if macro.unique_id in self.macros:
             # detect that the macro exists and emit an error
             raise DuplicateMacroInPackageError(macro=macro, macro_mapping=self.macros)
 
         self.macros[macro.unique_id] = macro
 
+        # 同时维护按名称、按项目查找宏的索引，供后续解析和编译使用。
         if self._macros_by_name is None:
             self._macros_by_name = self._build_macros_by_name(self.macros)
 
@@ -1778,6 +1780,7 @@ class Manifest(MacroMethods, dbtClassMixin):
 
         self._macros_by_package[macro.package_name][macro.name] = macro
 
+        # 反向记录当前文件定义了哪些宏，例如 macro.dbt_starrocks.starrocks__concat。
         source_file.macros.append(macro.unique_id)
 
     def has_file(self, source_file: SourceFile) -> bool:
@@ -1797,6 +1800,7 @@ class Manifest(MacroMethods, dbtClassMixin):
 
     def add_node_nofile(self, node: ManifestNode) -> None:
         # nodes can't be overwritten!
+        # 先检查唯一 ID，再保存当前对象引用；例如 model.custom_test_dbt.mart_people。
         _check_duplicates(node, self.nodes)
         self.nodes[node.unique_id] = node
 
@@ -1806,6 +1810,7 @@ class Manifest(MacroMethods, dbtClassMixin):
         node: ManifestNode,
         test_from: Optional[Dict[str, Any]] = None,
     ) -> None:
+        # 节点进入共享的内存 Manifest；输出 manifest.json 是后续独立步骤。
         self.add_node_nofile(node)
         if isinstance(source_file, SchemaSourceFile):
             if isinstance(node, GenericTestNode):
@@ -1822,6 +1827,7 @@ class Manifest(MacroMethods, dbtClassMixin):
         elif isinstance(source_file, (FixtureSourceFile, OsiSourceFile)):
             pass
         else:
+            # 普通模型 SQL 文件走这里，建立“源文件 -> 由它解析出的节点 ID”关联。
             source_file.nodes.append(node.unique_id)
 
     def add_exposure(self, source_file: SchemaSourceFile, exposure: Exposure) -> None:

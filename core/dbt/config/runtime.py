@@ -234,6 +234,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
         :returns: The new configuration.
         """
         # copy profile
+        # 依赖项目复用主项目的连接配置，因此项目名不同，profile_name 仍可能相同。
         profile = Profile(**self.to_profile_info())
         profile.validate()
 

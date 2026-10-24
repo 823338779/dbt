@@ -426,14 +426,17 @@ class ManifestLoader:
         # 两个局部变量先指向同一索引，orig 保留原始索引以备部分解析回退。
         project_parser_files = orig_project_parser_files = file_reader.project_parser_files
         self._perf_info.path_count = len(self.manifest.files)
+        # 只记录读取阶段耗时；文件数量不等于将执行的 SQL 或创建的表数量。
         self._perf_info.read_files_elapsed = time.perf_counter() - start_read_files
 
+        # 默认仍需解析；只有可用旧缓存和变化判断允许时，才可能跳过或缩小解析范围。
         self.skip_parsing = False
         project_parser_files = self.safe_update_project_parser_files_partially(
             project_parser_files
         )
 
         if self.manifest._parsing_info is None:
+            # 初始化解析统计信息，不处理文件内容。
             self.manifest._parsing_info = ParsingInfo()
 
         if self.skip_parsing:
@@ -444,9 +447,11 @@ class ManifestLoader:
             # the other files are loaded.  Also need to parse tests, specifically
             # generic tests
             start_load_macros = time.perf_counter()
+            # 先登记宏定义和建立查找能力，供后续模型解析使用；这里不是执行建表 SQL。
             self.load_and_parse_macros(project_parser_files)
 
             # If we're partially parsing check that certain macros have not been changed
+            # 全量解析时左侧为 False，短路跳过；部分解析才检查宏变化是否要求全量重来。
             if self.partially_parsing and self.skip_partial_parsing_because_of_macros():
                 fire_event(
                     UnableToPartialParse(
@@ -467,6 +472,7 @@ class ManifestLoader:
             start_parse_projects = time.perf_counter()
 
             # Load the rest of the files except for schema yaml files
+            # 这里保存解析器类，不是实例；模型等资源先解析，模型属性 YAML 留到后面处理。
             parser_types: List[Type[Parser]] = [
                 ModelParser,
                 SnapshotParser,
@@ -481,6 +487,7 @@ class ManifestLoader:
             for project in self.all_projects.values():
                 if project.project_name not in project_parser_files:
                     continue
+                # 将当前项目的文件分类索引与本阶段解析器类交给统一调度方法。
                 self.parse_project(
                     project, project_parser_files[project.project_name], parser_types
                 )
@@ -629,6 +636,8 @@ class ManifestLoader:
                 node.direct_parents = list(node.depends_on.nodes)
 
     def safe_update_project_parser_files_partially(self, project_parser_files: Dict) -> Dict:
+        # 没有可用旧 Manifest 时，原样返回完整分类索引；不执行下面的增量比较。
+        # 当前学习测试每次清空 .work，首次 parse 通常走此分支（未另行指定外部缓存时）。
         if self.saved_manifest is None:
             return project_parser_files
 
@@ -856,13 +865,16 @@ class ManifestLoader:
                 dbt.deprecations.warn("microbatch-macro-outside-of-batches-deprecation")
 
     def load_and_parse_macros(self, project_parser_files):
+        # 所有项目的宏结果汇总到同一个 manifest.macros，而不是复制进业务项目目录。
         for project in self.all_projects.values():
             if project.project_name not in project_parser_files:
                 continue
             parser_files = project_parser_files[project.project_name]
             if "MacroParser" in parser_files:
+                # 分类名在这里对应到真正的解析器实例；业务项目没有宏文件时内层循环为空。
                 parser = MacroParser(project, self.manifest)
                 for file_id in parser_files["MacroParser"]:
+                    # 取出之前读取的 SourceFile 并包装，避免重新读取磁盘。
                     block = FileBlock(self.manifest.files[file_id])
                     parser.parse_file(block)
                     # increment parsed path count for performance tracking
@@ -877,6 +889,7 @@ class ManifestLoader:
                     # increment parsed path count for performance tracking
                     self._perf_info.parsed_path_count += 1
 
+        # 宏登记完成后建立查找器，用于后续按名称和项目等信息选择宏实现。
         self.build_macro_resolver()
         # Look at changed macros and update the macro.depends_on.macros
         self.macro_depends_on()
@@ -896,6 +909,7 @@ class ManifestLoader:
 
         # Loop through parsers with loaded files.
         for parser_cls in parser_types:
+            # 例如 ModelParser 类对应 "ModelParser" 键，与读取阶段建立的分类索引相连接。
             parser_name = parser_cls.__name__
             # No point in creating a parser if we don't have files for it
             if parser_name not in parser_files or not parser_files[parser_name]:
@@ -906,9 +920,11 @@ class ManifestLoader:
             parser_start_timer = time.perf_counter()
 
             # Parse the project files for this parser
+            # 当前项目与主项目可能不同；共享 Manifest 用于收集各个项目的解析结果。
             parser: Parser = parser_cls(project, self.manifest, self.root_project)
             for file_id in parser_files[parser_name]:
                 block = FileBlock(self.manifest.files[file_id])
+                # 本方法也被后续 YAML 阶段复用；当前 ModelParser 不进入此分支。
                 if isinstance(parser, SchemaParser):
                     assert isinstance(block.file, SchemaSourceFile)
                     if self.partially_parsing:
@@ -920,6 +936,7 @@ class ManifestLoader:
                     # Came out of here with UnpatchedSourceDefinition containing configs at the source level
                     # and not configs at the table level (as expected)
                 else:
+                    # ModelParser 继承 SQLParser.parse_file，再转入 parse_node 构建模型节点。
                     parser.parse_file(block)
                 project_parsed_path_count += 1
 

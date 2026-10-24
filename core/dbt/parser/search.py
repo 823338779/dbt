@@ -48,6 +48,7 @@ def _get_node_name_from_relative_path(relative_path: str) -> str:
 # Could it be removed?
 @dataclass
 class FileBlock:
+    # 为已读取的文件提供 name、contents、path 等访问接口，包装本身不会重新读取磁盘。
     file: AnySourceFile
 
     @property

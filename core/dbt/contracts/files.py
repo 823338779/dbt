@@ -122,6 +122,8 @@ class BaseSourceFile(dbtClassMixin, SerializableType):
     def file_id(self):
         if isinstance(self.path, RemoteFile):
             return None
+        # 文件标识使用项目名和项目内路径，例如 custom_test_dbt://models/mart_people.sql。
+        # 它不是磁盘路径；实际位置由 path.absolute_path 给出，各依赖项目使用自己的根目录。
         return f"{self.project_name}://{self.path.original_file_path}"
 
     @property

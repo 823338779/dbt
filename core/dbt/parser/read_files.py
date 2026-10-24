@@ -173,6 +173,7 @@ def get_source_files(project, paths, extension, parse_file_type, saved_files, ig
 
 
 def read_files_for_parser(project, files, parse_ft, file_type_info, saved_files, ignore_spec):
+    # 先按资源类型确定目录和后缀，再查找文件；不是读取 SQL 后猜测应使用哪个解析器。
     dirs = file_type_info["paths"]
     parser_files = []
     for extension in file_type_info["extensions"]:
@@ -180,8 +181,10 @@ def read_files_for_parser(project, files, parse_ft, file_type_info, saved_files,
             project, dirs, extension, parse_ft, saved_files, ignore_spec
         )
         for sf in source_files:
+            # 原地更新共享文件字典，同时单独收集当前解析器需要处理的文件标识。
             files[sf.file_id] = sf
             parser_files.append(sf.file_id)
+    # 调用方将此列表保存到 project_parser_files[项目名][解析器名]。
     return parser_files
 
 
@@ -245,11 +248,14 @@ class ReadFilesFromFileSystem:
         self._read_osi_files_for_project(project)
 
     def _read_osi_files_for_project(self, project):
+        # OSI 是语义信息交换格式；这里仅登记 JSON 文件，后续再转换为语义模型和指标。
         for osi_path_name in project.osi_paths:
+            # 默认扫描 osi、OSI 目录；当前业务项目没有这些目录时直接跳过。
             osi_dir = pathlib.Path(project.project_root) / osi_path_name
             if not osi_dir.is_dir():
                 continue
             for osi_path in sorted(osi_dir.rglob("*.json")):
+                # 相对路径与项目根目录共同描述磁盘位置；排序使处理顺序稳定。
                 rel_to_osi = osi_path.relative_to(osi_dir)
                 fp = FilePath(
                     searched_path=osi_path_name,
@@ -258,6 +264,7 @@ class ReadFilesFromFileSystem:
                     project_root=project.project_root,
                 )
                 contents = load_file_contents(str(osi_path), strip=True)
+                # 记录文本校验值供变化检测，此处还没有解释 JSON 中的业务语义。
                 checksum = FileHash.from_contents(normalize_file_contents(contents))
                 sf = OsiSourceFile(
                     path=fp,
@@ -266,6 +273,7 @@ class ReadFilesFromFileSystem:
                     project_name=project.project_name,
                     contents=contents,
                 )
+                # OSI 不加入某个 OSIParser 分类列表，后续由 load_osi_into_manifest 专门处理。
                 self.files[sf.file_id] = sf
 
 

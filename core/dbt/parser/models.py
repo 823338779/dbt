@@ -175,6 +175,7 @@ def verify_python_model_code(node):
 
 class ModelParser(SimpleSQLParser[ModelNode]):
     def parse_from_dict(self, dct, validate=True) -> ModelNode:
+        # 将节点骨架字典校验并转换为 ModelNode，此处不执行模型 SQL。
         if validate:
             ModelNode.validate(dct)
         return ModelNode.from_dict(dct)
@@ -185,6 +186,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
 
     @classmethod
     def get_compiled_path(cls, block: FileBlock):
+        # 例如 models/mart_people.sql 返回 mart_people.sql；这是路径，不是编译后的 SQL。
         return block.path.relative_path
 
     def parse_python_model(self, node, config, context):
@@ -260,6 +262,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
     def render_update(
         self, node: ModelNode, config: ContextConfig, validate_config_call_dict: bool = False
     ) -> None:
+        # 重写父类入口：SQL 模型可先静态提取 ref/source/config，不一定完整渲染 Jinja。
         self.manifest._parsing_info.static_analysis_path_count += 1
         flags = get_flags()
         if node.language == ModelLanguage.python:
@@ -278,6 +281,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
 
         elif not flags.STATIC_PARSER:
             # jinja rendering
+            # 静态解析被关闭时，通过父类的 Jinja 渲染过程收集配置与引用。
             super().render_update(node, config)
             return
 
@@ -330,6 +334,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
             statically_parsed = self.run_experimental_parser(node)
         # run the stable static parser unless it is explicitly turned off
         else:
+            # 返回提取结果字典或失败标志；还没有把结果写回 node.refs。
             statically_parsed = self.run_static_parser(node)
 
         # if the static parser succeeded, extract some data in easy-to-compare formats
@@ -353,6 +358,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
 
             # update the unrendered config with values from the static parser.
             # values from yaml files are in there already
+            # 静态提取成功，原地补充已有模型节点；不生成另一个 ModelNode。
             self.populate(node, config, statically_parsed)
 
             # if we took a jinja sample, compare now that the base node has been populated
@@ -374,6 +380,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
         # if the static parser didn't succeed, fall back to jinja
         else:
             # jinja rendering
+            # 静态提取不支持当前文本或宏覆盖时回退；这里仍是 parse，不是执行数据库 SQL。
             super().render_update(node, config, validate_config_call_dict=True)
 
             # if sampling, add the correct messages for tracking
@@ -406,17 +413,21 @@ class ModelParser(SimpleSQLParser[ModelNode]):
 
     def run_static_parser(self, node: ModelNode) -> Optional[Union[str, Dict[str, List[Any]]]]:
         # if any banned macros have been overridden by the user, we cannot use the static parser.
+        # 项目覆盖 ref/source/config 后，其含义可能改变，不能再按默认语义静态提取。
         if self._has_banned_macro(node):
             return "has_banned_macro"
 
         # run the stable static parser and return the results
         try:
+            # dbt-extractor 原生扩展提取调用信息；Windows 安装为 .pyd，普通 Python 单步看不到内部。
+            # mart_people.sql 的 refs 为 [{"name": "stg_people"}]，sources/configs 为空。
             statically_parsed = py_extract_from_source(node.raw_code)
             return _shift_sources(statically_parsed)
         # if we want information on what features are barring the static
         # parser from reading model files, this is where we would add that
         # since that information is stored in the `ExtractionError`.
         except ExtractionError:
+            # 交给上层选择 Jinja 回退路径，而不是将所有静态提取失败直接当成模型错误。
             return "cannot_parse"
 
     def run_experimental_parser(
@@ -441,6 +452,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
 
     # checks for banned macros
     def _has_banned_macro(self, node: ModelNode) -> bool:
+        # 检查的是当前项目或主项目是否定义了同名覆盖宏，并非禁止 SQL 使用这些函数。
         # first check if there is a banned macro defined in scope for this model file
         root_project_name = self.root_project.project_name
         project_name = node.package_name
@@ -462,14 +474,17 @@ class ModelParser(SimpleSQLParser[ModelNode]):
     # rendering like the static parser.
     def populate(self, node: ModelNode, config: ContextConfig, statically_parsed: Dict[str, Any]):
         # manually fit configs in
+        # 这里只收集 SQL 内联 config()；空字典表示没有内联配置，不会清除项目配置。
         config._config_call_dict = _get_config_call_dict(statically_parsed)
 
         # if there are hooks present this, it WILL render jinja. Will need to change
         # when the experimental parser supports hooks
+        # 合并当前可用配置并更新 node.config 等属性，例如项目配置中的 materialized: table。
         self.update_parsed_node_config(node, config, validate_config_call_dict=True)
 
         # update the unrendered config with values from the file.
         # values from yaml files are in there already
+        # 补充源码中的配置记录；本例 configs=[]，此行不会新增内容。
         node.unrendered_config.update(dict(statically_parsed["configs"]))
 
         # set refs and sources on the node object
@@ -478,9 +493,12 @@ class ModelParser(SimpleSQLParser[ModelNode]):
             name = ref.get("name")
             package = ref.get("package")
             version = ref.get("version")
+            # ref('stg_people') 只指定 name；未指定的 package、version 为 None。
             refs.append(RefArgs(name, package, version))
 
+        # 此处保存声明的引用，还未查找目标节点并填充最终 depends_on.nodes，也未替换 SQL 表名。
         node.refs += refs
+        # source() 引用 YAML 声明的数据源；本例只有 ref()，所以 sources 为空。
         node.sources += statically_parsed["sources"]
 
         # configs don't need to be merged into the node because they
@@ -493,6 +511,7 @@ class ModelParser(SimpleSQLParser[ModelNode]):
 
 # pure function. safe to use elsewhere, but unlikely to be useful outside this file.
 def _get_config_call_dict(static_parser_result: Dict[str, Any]) -> Dict[str, Any]:
+    # 将提取器返回的配置键值对合并为配置上下文字典。
     config_call_dict: Dict[str, Any] = {}
 
     for c in static_parser_result["configs"]:
@@ -503,6 +522,7 @@ def _get_config_call_dict(static_parser_result: Dict[str, Any]) -> Dict[str, Any
 
 # TODO if we format sources in the extractor to match this type, we won't need this function.
 def _shift_sources(static_parser_result: Dict[str, List[Any]]) -> Dict[str, List[Any]]:
+    # 复制提取结果并统一 source 调用的数据形状；没有 source() 时将空集合整理为空列表。
     shifted_result = deepcopy(static_parser_result)
     source_calls = []
 

@@ -34,7 +34,9 @@ class MacroParser(BaseParser[Macro]):
         return block.path.relative_path
 
     def parse_macro(self, block: jinja.BlockTag, base_node: UnparsedMacro, name: str) -> Macro:
+        # 宏 ID 由资源类型、项目名、宏名组成，例如 macro.dbt_starrocks.starrocks__concat。
         unique_id = self.generate_unique_id(name)
+        # 保留完整 Jinja 宏定义，不在这里传入参数或生成具体调用的 SQL。
         macro_sql = block.full_block or ""
 
         return Macro(
@@ -104,6 +106,7 @@ class MacroParser(BaseParser[Macro]):
             node = self.parse_macro(block, base_node, name)
 
             if getattr(get_flags(), "validate_macro_args", True):
+                # 开启参数提取时记录 fields 等参数名；不会根据名称推断参数类型。
                 node.arguments = self._extract_args(macro)
 
             # get supported_languages for materialization macro
@@ -118,12 +121,14 @@ class MacroParser(BaseParser[Macro]):
             return []
 
     def parse_file(self, block: FileBlock):
+        # 文件已在读取阶段载入内存；这里取出对象和原始文本，不重新扫描磁盘。
         assert isinstance(block.file, SourceFile)
         source_file = block.file
         assert isinstance(source_file.contents, str)
         original_file_path = source_file.path.original_file_path
 
         # this is really only used for error messages
+        # 先包装文件级待解析信息，便于报错定位；此时还没有提取具体宏名和参数。
         base_node = UnparsedMacro(
             path=original_file_path,
             original_file_path=original_file_path,
@@ -133,5 +138,6 @@ class MacroParser(BaseParser[Macro]):
             language="sql",
         )
 
+        # 一个文件可以定义多个宏；解析后逐个登记到 manifest.macros，而非 manifest.nodes。
         for node in self.parse_unparsed_macros(base_node):
             self.manifest.add_macro(block.file, node)
