@@ -38,7 +38,7 @@ def dbt_project(tmp_path: Path, starrocks_connection: MySQLConnection) -> Genera
     project = tmp_path / schema
     shutil.copytree(Path(__file__).parent / "project", project)
     profile = {
-        "core_workflow": {
+        "custom_test_dbt": {
             "target": "test",
             "outputs": {
                 "test": {

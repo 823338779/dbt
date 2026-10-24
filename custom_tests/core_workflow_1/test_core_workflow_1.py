@@ -21,12 +21,12 @@ def test_01_parse_project(dbt_project: Path) -> None:
     assert result.success, result.exception
     assert isinstance(result.result, Manifest)
     nodes = result.result.nodes
-    assert {"seed.core_workflow.people", "model.core_workflow.stg_people", "model.core_workflow.mart_people"} <= set(
+    assert {"seed.custom_test_dbt.people", "model.custom_test_dbt.stg_people", "model.custom_test_dbt.mart_people"} <= set(
         nodes
     )
-    assert "model.core_workflow.stg_people" in nodes["model.core_workflow.mart_people"].depends_on.nodes
-    assert nodes["model.core_workflow.stg_people"].config.materialized == "view"
-    assert nodes["model.core_workflow.mart_people"].config.materialized == "table"
+    assert "model.custom_test_dbt.stg_people" in nodes["model.custom_test_dbt.mart_people"].depends_on.nodes
+    assert nodes["model.custom_test_dbt.stg_people"].config.materialized == "view"
+    assert nodes["model.custom_test_dbt.mart_people"].config.materialized == "table"
 
 
 def test_02_select_model_and_ancestors(dbt_project: Path) -> None:
@@ -34,7 +34,7 @@ def test_02_select_model_and_ancestors(dbt_project: Path) -> None:
     result = _invoke(dbt_project, "list", "--select", "+mart_people", "--resource-type", "model", "seed")
 
     assert result.success, result.exception
-    assert set(result.result) == {"core_workflow.people", "core_workflow.stg_people", "core_workflow.mart_people"}
+    assert set(result.result) == {"custom_test_dbt.people", "custom_test_dbt.stg_people", "custom_test_dbt.mart_people"}
 
 
 def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQLConnection) -> None:

@@ -1,11 +1,11 @@
-name: core_workflow
+name: custom_test_dbt
 version: '1.0.0'
 config-version: 2
-profile: core_workflow
+profile: custom_test_dbt
 
 model-paths: [models]
 seed-paths: [seeds]
 
 models:
-  core_workflow:
+  custom_test_dbt:
     +materialized: table
