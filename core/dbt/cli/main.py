@@ -60,6 +60,7 @@ class dbtRunner:
     def invoke(self, args: List[str], **kwargs) -> dbtRunnerResult:
         try:
             load_dotenv(find_dotenv(usecwd=True), override=False)
+            # 将命令参数交给 Click，obj 用于在各层命令包装器之间共享配置和解析结果。
             dbt_ctx = cli.make_context(cli.name, args.copy())
             dbt_ctx.obj = {
                 "manifest": self.manifest,
@@ -72,6 +73,7 @@ class dbtRunner:
                 # Hack to set parameter source to custom string
                 dbt_ctx.set_parameter_source(key, "kwargs")  # type: ignore
 
+            # Click 分派到选中的命令；parse 的解析工作在其 requires.manifest 包装器内完成。
             result, success = cli.invoke(dbt_ctx)
             return dbtRunnerResult(
                 result=result,
@@ -551,6 +553,7 @@ cli.add_command(ls, "ls")
 
 
 # dbt parse
+# 定义时装饰器从下往上包装；调用时先进入外层包装器，再进入原始 parse 函数。
 @cli.command("parse")
 @click.pass_context
 @global_flags
@@ -568,6 +571,7 @@ cli.add_command(ls, "ls")
 def parse(ctx, **kwargs):
     """Parses the project and provides information on performance"""
     # manifest generation and writing happens in @requires.manifest
+    # 此时解析已完成，函数体只取出 Manifest，并与成功标志一起返回。
     return ctx.obj["manifest"], True
 
 

@@ -289,6 +289,7 @@ def profile(func):
         # https://github.com/dbt-labs/dbt-core/issues/6259
         threads = getattr(flags, "THREADS", None)
         profile = load_profile(flags.PROJECT_DIR, flags.VARS, flags.PROFILE, flags.TARGET, threads)
+        # 将连接配置存入上下文，供后续项目加载和运行配置构建使用。
         ctx.obj["profile"] = profile
         get_invocation_context().uses_adapter(profile.credentials.type)
 
@@ -327,6 +328,7 @@ def project(func):
             validate=True,
             require_vars=require_vars,
         )
+        # 项目配置来自 dbt_project.yml，后续包装器通过同一个 ctx.obj 读取。
         ctx.obj["project"] = project
 
         # Plugins
@@ -357,6 +359,7 @@ def runtime_config(func):
         if None in reqs:
             raise DbtProjectError("profile and project required for runtime_config")
 
+        # 合并项目、连接配置与运行参数，形成解析入口所需的 RuntimeConfig。
         config = RuntimeConfig.from_parts(
             ctx.obj["project"],
             ctx.obj["profile"],
@@ -400,6 +403,7 @@ def manifest(*args0, write=True, write_perf_info=False):
             ctx = args[0]
             assert isinstance(ctx, Context)
 
+            # 先生成并保存 Manifest；对于 parse 命令，下面的 func 就是原始 parse 函数。
             setup_manifest(ctx, write=write, write_perf_info=write_perf_info)
             return func(*args, **kwargs)
 
@@ -430,6 +434,7 @@ def _bridge_v2_catalogs(runtime_config: "RuntimeConfig", catalogs_v2: list) -> l
 
 def setup_manifest(ctx: Context, write: bool = True, write_perf_info: bool = False):
     """Load the manifest and add it to the context."""
+    # 检查前面的包装器是否已经备齐解析所需的数据。
     req_strs = ["flags", "profile", "project", "runtime_config"]
     reqs = [ctx.obj.get(dep) for dep in req_strs]
 
@@ -440,6 +445,7 @@ def setup_manifest(ctx: Context, write: bool = True, write_perf_info: bool = Fal
 
     flags = ctx.obj["flags"]
     project_name = ctx.obj["project"].project_name
+    # 此开关控制 catalogs.yml 的配置规范，与下面的 USE_V2_PARSER 解析器开关不同。
     use_v2 = flags.USE_CATALOGS_V2
 
     if use_v2:
@@ -466,6 +472,7 @@ def setup_manifest(ctx: Context, write: bool = True, write_perf_info: bool = Fal
         ctx.obj["catalogs"] = catalogs
 
     # if a manifest has already been set on the context, don't overwrite it
+    # dbtRunner() 未传入现成的 Manifest 时，需要在这里调用解析器生成。
     if ctx.obj.get("manifest") is None:
         if getattr(flags, "USE_V2_PARSER", False):
             from dbt.parser.fusion import parse_with_fusion
@@ -477,6 +484,7 @@ def setup_manifest(ctx: Context, write: bool = True, write_perf_info: bool = Fal
                 runtime_config, ctx.obj["manifest"], active_integrations
             )
         else:
+            # Python 解析主线：等待 parse_manifest 返回，再将结果写入共享上下文。
             ctx.obj["manifest"] = parse_manifest(
                 runtime_config,
                 write_perf_info,

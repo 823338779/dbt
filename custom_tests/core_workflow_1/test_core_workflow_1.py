@@ -11,11 +11,13 @@ from mysql.connector import MySQLConnection
 
 
 def _invoke(project: Path, command: str, *options: str) -> dbtRunnerResult:
+    # 通过 Python 调用 dbt 命令；项目配置和连接配置都从 fixture 创建的临时目录读取。
     return dbtRunner().invoke([command, *options, "--project-dir", str(project), "--profiles-dir", str(project)])
 
 
 def test_01_parse_project(dbt_project: Path) -> None:
     """Parsing discovers the seed, models, and their dependencies."""
+    # pytest 按参数名找到同名 fixture，将其 yield 的 Path 注入；Path 注解不负责匹配。
     result = _invoke(dbt_project, "parse")
 
     assert result.success, result.exception

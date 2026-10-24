@@ -420,6 +420,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
 
     def load_dependencies(self, base_only=False) -> Mapping[str, "RuntimeConfig"]:
         if self.dependencies is None:
+            # 先登记主项目，再加载适配器及 dbt 公共项目的本地配置；这里不下载安装依赖。
             all_projects = {self.project_name: self}
             internal_packages = get_include_paths(self.credentials.type)
             if base_only:
@@ -455,6 +456,7 @@ class RuntimeConfig(Project, Profile, AdapterRequiredConfig):
             for project_name, project in self.load_projects(project_paths):
                 if project_name in all_projects:
                     raise NonUniquePackageNameError(project_name)
+                # 键是项目配置中的 name，值是 RuntimeConfig，不是 Python 模块或模型节点。
                 all_projects[project_name] = project
             self.dependencies = all_projects
         return self.dependencies

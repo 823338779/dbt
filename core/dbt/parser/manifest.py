@@ -280,12 +280,16 @@ class ManifestLoader:
         macro_hook: Optional[Callable[[Manifest], Any]] = None,
         file_diff: Optional[FileDiff] = None,
     ) -> None:
+        # root_project 是业务项目；all_projects 还包含适配器、dbt 公共项目和其他依赖。
         self.root_project: RuntimeConfig = root_project
         self.all_projects: Mapping[str, RuntimeConfig] = all_projects
         self.file_diff = file_diff
+        # 创建本轮解析的结果容器，文件、模型节点和宏将在后续阶段逐步填入。
         self.manifest: Manifest = Manifest()
+        # 两个属性引用同一对象，并未复制；保留新对象供部分解析需要回退时使用。
         self.new_manifest = self.manifest
         self.manifest.metadata = root_project.get_metadata()
+        # 宏是 Jinja 定义的可复用函数；解析宏后才建立按名称查找实现的 resolver。
         self.macro_resolver = None  # built after macros are loaded
         self.started_at = time.time()
         # This is a MacroQueryStringSetter callable, which is called
@@ -295,12 +299,14 @@ class ManifestLoader:
         if macro_hook is None:
             self.macro_hook = lambda m: None
         else:
+            # 保存回调供后续调用，此处不执行宏回调。
             self.macro_hook = macro_hook
 
         self._perf_info = self.build_perf_info()
 
         # State check determines whether the saved_manifest and the current
         # manifest match well enough to do partial parsing
+        # 记录配置状态，供后续判断旧解析缓存能否复用。
         self.manifest.state_check = self.build_manifest_state_check()
         # We need to know if we're actually partially parsing. It could
         # have been enabled, but not happening because of some issue.
@@ -309,6 +315,7 @@ class ManifestLoader:
         self.skip_parsing = False
 
         # This is a saved manifest from a previous run that's used for partial parsing
+        # 尝试读取旧解析结果；没有可用缓存时为 None，允许部分解析不等于本次一定采用。
         self.saved_manifest: Optional[Manifest] = self.read_manifest_for_partial_parse()
 
     # This is the method that builds a complete manifest. We sometimes
@@ -349,7 +356,9 @@ class ManifestLoader:
         # Start performance counting
         start_load_all = time.perf_counter()
 
+        # 收集项目名到 RuntimeConfig 的映射，成为 loader 的 all_projects。
         projects = config.load_dependencies()
+        # cls 是 ManifestLoader；此调用先执行 __init__，尚未开始 load 中的文件读取。
         loader = cls(
             config,
             projects,
@@ -357,6 +366,7 @@ class ManifestLoader:
             file_diff=file_diff,
         )
 
+        # 核心解析调度入口：读取文件、调用各类解析器，并构建资源及引用关系。
         manifest = loader.load()
 
         _check_manifest(manifest, config)
@@ -388,6 +398,7 @@ class ManifestLoader:
         # which is a dictionary of projects to a dictionary
         # of parsers to lists of file strings. The file strings are
         # used to get the SourceFiles from the manifest files.
+        # 旧文件记录供读取器参考，区别于本次结果容器中的 manifest.files。
         saved_files = self.saved_manifest.files if self.saved_manifest else {}
         file_reader: Optional[ReadFiles] = None
         if self.file_diff:
@@ -401,6 +412,7 @@ class ManifestLoader:
             )
         else:
             # We're getting files from the file system
+            # 创建读取器只准备参数，实际扫描由下面的 read_files() 触发。
             file_reader = ReadFilesFromFileSystem(
                 all_projects=self.all_projects,
                 files=self.manifest.files,
@@ -408,8 +420,10 @@ class ManifestLoader:
             )
 
         # Set the files in the manifest and save the project_parser_files
+        # 同时收集文件对象和“项目 -> 解析器 -> 文件标识列表”的分类索引。
         file_reader.read_files()
         self.manifest.files = file_reader.files
+        # 两个局部变量先指向同一索引，orig 保留原始索引以备部分解析回退。
         project_parser_files = orig_project_parser_files = file_reader.project_parser_files
         self._perf_info.path_count = len(self.manifest.files)
         self._perf_info.read_files_elapsed = time.perf_counter() - start_read_files
@@ -2654,11 +2668,13 @@ def parse_manifest(
     write_json: bool,
     active_integrations: List[Optional[CatalogWriteIntegrationConfig]],
 ) -> Manifest:
+    # 根据运行配置注册并取得适配器；宏上下文生成函数在这里被设置，而非立即调用。
     register_adapter(runtime_config, get_mp_context())
     adapter = get_adapter(runtime_config)
     adapter.set_macro_context_generator(generate_runtime_macro_context)
     for integration in active_integrations:
         adapter.add_catalog_integration(integration)
+    # 将运行配置交给 ManifestLoader，返回内存中的解析结果。
     manifest = ManifestLoader.get_full_manifest(
         runtime_config,
         write_perf_info=write_perf_info,
@@ -2666,6 +2682,7 @@ def parse_manifest(
 
     # If we should (over)write the manifest in the target path, do that now
     if write and write_json:
+        # 解析完成后，按输出开关将结果写到项目 target 目录。
         write_manifest(manifest, runtime_config.project_target_path)
         enrich_manifest_with_plugin_artifacts(manifest, runtime_config.project_name)
     return manifest

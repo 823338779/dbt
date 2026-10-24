@@ -219,15 +219,20 @@ class ReadFilesFromFileSystem:
     project_parser_files: Dict = field(default_factory=dict)
 
     def read_files(self):
+        # 扫描所有已加载项目，所以文件集合也会包含适配器和 dbt 内置的宏文件。
         for project in self.all_projects.values():
+            # 此处只生成目录、后缀和解析器分类规则，尚未解析模型或宏。
             file_types = get_file_types_for_project(project)
             self.read_files_for_project(project, file_types)
 
     def read_files_for_project(self, project, file_types):
+        # 读取当前项目的 .dbtignore，准备扫描时使用的忽略规则。
         dbt_ignore_spec = generate_dbt_ignore_spec(project.project_root)
+        # project_files 引用该项目的分类字典，后续按解析器名称填入文件标识列表。
         project_files = self.project_parser_files[project.project_name] = {}
 
         for parse_ft, file_type_info in file_types.items():
+            # parser 目前只是分类用的字符串；这里收集文件，还没有实例化对应解析器。
             project_files[file_type_info["parser"]] = read_files_for_parser(
                 project,
                 self.files,
@@ -432,6 +437,7 @@ def _get_extensions(base_ext: Literal[".sql", ".md"]) -> List[str]:
 
 
 def get_file_types_for_project(project):
+    # 同为 .sql，模型目录与宏目录中的文件会按以下规则交给不同解析器处理。
     file_types = {
         ParseFileType.Macro: {
             "paths": project.macro_paths,
@@ -439,6 +445,7 @@ def get_file_types_for_project(project):
             "parser": "MacroParser",
         },
         ParseFileType.Model: {
+            # 来自 dbt_project.yml 的 model-paths；相对于该项目的 project_root 扫描。
             "paths": project.model_paths,
             "extensions": [".py"] + _get_extensions(".sql"),
             "parser": "ModelParser",
