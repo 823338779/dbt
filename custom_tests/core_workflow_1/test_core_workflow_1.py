@@ -25,6 +25,8 @@ def test_01_parse_project(dbt_project: Path) -> None:
         nodes
     )
     assert "model.core_workflow.stg_people" in nodes["model.core_workflow.mart_people"].depends_on.nodes
+    assert nodes["model.core_workflow.stg_people"].config.materialized == "view"
+    assert nodes["model.core_workflow.mart_people"].config.materialized == "table"
 
 
 def test_02_select_model_and_ancestors(dbt_project: Path) -> None:
@@ -36,7 +38,7 @@ def test_02_select_model_and_ancestors(dbt_project: Path) -> None:
 
 
 def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQLConnection) -> None:
-    """Build seeds and models, run column tests, and verify transformed rows."""
+    """Build table/view models, run column tests, and verify relation types and rows."""
     result = _invoke(dbt_project, "build")
 
     assert result.success, result.exception
@@ -45,6 +47,13 @@ def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQ
     assert {node.status for node in result.result.results} == {"success", "pass"}
 
     with starrocks_connection.cursor() as cursor:
+        cursor.execute(
+            "select TABLE_NAME, TABLE_TYPE from information_schema.tables "
+            "where TABLE_SCHEMA = %s and TABLE_NAME in ('stg_people', 'mart_people') order by TABLE_NAME",
+            (dbt_project.name,),
+        )
+        assert cursor.fetchall() == [("mart_people", "BASE TABLE"), ("stg_people", "VIEW")]
+
         cursor.execute(f"select id, name from `{dbt_project.name}`.mart_people order by id")
         assert cursor.fetchall() == [
             (1, "ADA"),
