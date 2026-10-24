@@ -60,6 +60,7 @@ makefile.test.env
 
 # Unit test artifacts
 index.html
+custom_tests/core_workflow_1/.work/
 
 
 # Translations

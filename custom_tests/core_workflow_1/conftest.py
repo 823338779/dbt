@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -33,13 +34,19 @@ def starrocks_connection() -> Generator[MySQLConnection, None, None]:
 
 
 @pytest.fixture
-def dbt_project(tmp_path: Path, starrocks_connection: MySQLConnection) -> Generator[Path, None, None]:
+def dbt_project(starrocks_connection: MySQLConnection) -> Generator[Path, None, None]:
     """Run each test in its own StarRocks database and remove it afterward."""
-    # 参数按 fixture 名称注入：tmp_path 由 pytest 内置提供，连接由上面的 fixture 提供。
+    # 连接由同名 fixture 注入；工作副本使用固定目录，便于调试时查看文件。
     schema = f"dbt_core_{uuid4().hex[:12]}"
-    project = tmp_path / schema
-    # 运行的是临时副本，因此调试时的 project_root 与仓库中的项目目录不同。
-    shutil.copytree(Path(__file__).parent / "project", project)
+    test_root = Path(__file__).resolve().parent
+    project = test_root / ".work"
+    # 删除前确认路径没有被符号链接或目录联接重定向，避免清理其他目录。
+    if project.resolve() != project:
+        raise ValueError(f"Test work directory must not be redirected: {project}")
+    if project.exists():
+        shutil.rmtree(project)
+    # 每次重新复制，清除上次生成的 target、日志及其他存量文件；结束后保留供查看。
+    shutil.copytree(test_root / "project", project)
     profile = {
         "custom_test_dbt": {
             "target": "test",
@@ -65,5 +72,13 @@ def dbt_project(tmp_path: Path, starrocks_connection: MySQLConnection) -> Genera
         # 此路径成为测试函数的 dbt_project 入参；测试结束后恢复执行并删除测试数据库。
         yield project
     finally:
+        # dbt 的 file_log 会跨命令保留 handler；释放本项目日志，避免 Windows 下次清理失败。
+        file_logger = logging.getLogger("file_log")
+        for handler in file_logger.handlers[:]:
+            if isinstance(handler, logging.FileHandler) and Path(handler.baseFilename).is_relative_to(
+                project
+            ):
+                handler.close()
+                file_logger.removeHandler(handler)
         with starrocks_connection.cursor() as cursor:
             cursor.execute(f"DROP DATABASE `{schema}`")

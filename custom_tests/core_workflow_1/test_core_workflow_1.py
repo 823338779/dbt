@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
 from dbt.cli.main import dbtRunner, dbtRunnerResult
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.results import RunExecutionResult
@@ -11,7 +13,7 @@ from mysql.connector import MySQLConnection
 
 
 def _invoke(project: Path, command: str, *options: str) -> dbtRunnerResult:
-    # 通过 Python 调用 dbt 命令；项目配置和连接配置都从 fixture 创建的临时目录读取。
+    # 通过 Python 调用 dbt 命令；项目配置和连接配置都从 fixture 创建的固定工作目录读取。
     return dbtRunner().invoke([command, *options, "--project-dir", str(project), "--profiles-dir", str(project)])
 
 
@@ -41,6 +43,9 @@ def test_02_select_model_and_ancestors(dbt_project: Path) -> None:
 
 def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQLConnection) -> None:
     """Build table/view models, run column tests, and verify relation types and rows."""
+    # 工作目录固定，数据库名仍每次独立生成，应从实际连接配置中读取。
+    profile = yaml.safe_load((dbt_project / "profiles.yml").read_text(encoding="utf-8"))
+    schema = profile["custom_test_dbt"]["outputs"]["test"]["schema"]
     result = _invoke(dbt_project, "build")
 
     assert result.success, result.exception
@@ -52,11 +57,11 @@ def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQ
         cursor.execute(
             "select TABLE_NAME, TABLE_TYPE from information_schema.tables "
             "where TABLE_SCHEMA = %s and TABLE_NAME in ('stg_people', 'mart_people') order by TABLE_NAME",
-            (dbt_project.name,),
+            (schema,),
         )
         assert cursor.fetchall() == [("mart_people", "BASE TABLE"), ("stg_people", "VIEW")]
 
-        cursor.execute(f"select id, name from `{dbt_project.name}`.mart_people order by id")
+        cursor.execute(f"select id, name from `{schema}`.mart_people order by id")
         assert cursor.fetchall() == [
             (1, "ADA"),
             (2, "GRACE"),
