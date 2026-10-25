@@ -43,6 +43,9 @@ class dbtRunnerResult:
         RunExecutionResult,  # build, compile, run, seed, snapshot, test, run-operation
     ] = None
 
+    # The manifest after command execution; result retains its command-specific type.
+    manifest: Optional[Manifest] = None
+
 
 # Programmatic invocation
 class dbtRunner:
@@ -78,6 +81,7 @@ class dbtRunner:
             return dbtRunnerResult(
                 result=result,
                 success=success,
+                manifest=dbt_ctx.obj.get("manifest"),
             )
         except requires.ResultExit as e:
             return dbtRunnerResult(
