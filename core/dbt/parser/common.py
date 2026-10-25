@@ -94,6 +94,7 @@ Testable = TypeVar("Testable", UnparsedNodeUpdate, UnpatchedSourceDefinition, Un
 
 @dataclass
 class YamlBlock(FileBlock):
+    # 将文件来源和已解析的 YAML 字典一起传递，不执行文件读取。
     data: Dict[str, Any]
 
     @classmethod
@@ -192,6 +193,7 @@ class VersionedTestBlock(TestBlock, Generic[Versioned]):
 
 @dataclass
 class GenericTestBlock(TestBlock[Testable], Generic[Testable]):
+    # 单个通用测试的输入包装，尚不是最终登记到 Manifest 的 GenericTestNode。
     data_test: Dict[str, Any]
     column_name: Optional[str]
     tags: List[str]

@@ -81,6 +81,7 @@ class SchemaGenericTestParser(SimpleParser):
         if not column.data_tests:
             return
 
+        # 本例 id 列依次分派 not_null、unique，两次调用共享模型块和列对象。
         for data_test in column.data_tests:
             self.parse_test(block, data_test, column, version)
 
@@ -163,6 +164,7 @@ class SchemaGenericTestParser(SimpleParser):
         version: Optional[NodeVersion],
     ) -> GenericTestNode:
         try:
+            # 整理测试名称、参数和配置；builder 本身不会保存到 Manifest，也不查询数据。
             builder = TestBuilder(
                 data_test=data_test,
                 target=target,
@@ -279,6 +281,7 @@ class SchemaGenericTestParser(SimpleParser):
     # more to handle additional macros or to use static
     # parsing to avoid jinja overhead.
     def render_test_update(self, node, config, builder, schema_file_id):
+        # 内置 not_null/unique 快路径只收集 refs/sources；节点依赖仍待后续统一解析。
         macro_unique_id = self.macro_resolver.get_macro_id(
             node.package_name, "test_" + builder.name
         )
@@ -330,6 +333,7 @@ class SchemaGenericTestParser(SimpleParser):
         builds the initial node to be parsed, but rendering is basically the
         same
         """
+        # 通用测试重写了 parse_node：从测试声明构造节点，再登记到共享 Manifest。
         node = self.parse_generic_test(
             target=block.target,
             data_test=block.data_test,
@@ -342,6 +346,7 @@ class SchemaGenericTestParser(SimpleParser):
         return node
 
     def add_test_node(self, block: GenericTestBlock, node: GenericTestNode):
+        # 记录测试来自哪个 YAML 条目，并按启用状态存入 nodes 或 disabled。
         test_from = {"key": block.target.yaml_key, "name": block.target.name}
         if node.config.enabled:
             self.manifest.add_node(block.file, node, test_from)
@@ -372,6 +377,7 @@ class SchemaGenericTestParser(SimpleParser):
         column: Optional[UnparsedColumn],
         version: Optional[NodeVersion],
     ) -> None:
+        # 将 not_null 这样的简写规范化为 {"not_null": {}}，列名在后面单独传递。
         if isinstance(data_test, str):
             data_test = {data_test: {}}
 
@@ -379,6 +385,7 @@ class SchemaGenericTestParser(SimpleParser):
             column_name: Optional[str] = None
             column_tags: List[str] = []
         else:
+            # 列级测试取当前列名；仅配置要求时才用适配器添加标识符引号。
             column_name = column.name
             should_quote = column.quote or (column.quote is None and target_block.quote_columns)
             if should_quote:
@@ -389,6 +396,7 @@ class SchemaGenericTestParser(SimpleParser):
                 column_config_tags = [column_config_tags]
             column_tags = list(set(column.tags + column_config_tags))
 
+        # 从整个模型测试块中包装出一个具体测试，例如 mart_people.id 的 not_null。
         block = GenericTestBlock.from_test_block(
             src=target_block,
             data_test=data_test,
@@ -399,6 +407,7 @@ class SchemaGenericTestParser(SimpleParser):
         self.parse_node(block)
 
     def parse_tests(self, block: TestBlock) -> None:
+        # 先处理列上的测试，再处理模型层级测试；本例只有 id 列的两个声明。
         for column in block.columns:
             self.parse_column_tests(block, column, None)
 
@@ -406,6 +415,7 @@ class SchemaGenericTestParser(SimpleParser):
             self.parse_test(block, data_test, None, None)
 
     def parse_versioned_tests(self, block: VersionedTestBlock) -> None:
+        # VersionedTestBlock 也承载无版本模型；没有 versions 时走普通测试分派。
         if not block.target.versions:
             self.parse_tests(block)
         else:

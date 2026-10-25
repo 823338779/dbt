@@ -569,6 +569,7 @@ def process_models_for_unit_test(
     # deterministic. Resolve using the unit test's own package -- not the
     # root project -- so unit tests defined in a dependency package correctly
     # resolve models within that same package.
+    # YAML unit_tests 的模型依赖在此阶段才解析；不能当作前置构图时必然已有的依赖。
     tested_node = find_tested_model_node(manifest, unit_test_def.package_name, unit_test_def.model)
     if tested_node is None:
         raise ParsingError(

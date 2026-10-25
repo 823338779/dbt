@@ -120,6 +120,7 @@ def find_unique_id_for_package(storage, key, package: Optional[PackageName]) -> 
 
 
 class DocLookup(dbtClassMixin):
+    # 文档块名称 → 项目名 → 文档 unique_id；正文仍保存在 manifest.docs 对象中。
     def __init__(self, manifest: "Manifest") -> None:
         self.storage: Dict[str, Dict[PackageName, UniqueID]] = {}
         self.populate(manifest)
@@ -227,6 +228,7 @@ class FunctionLookup(dbtClassMixin):
 
 
 class RefableLookup(dbtClassMixin):
+    # 将可被 ref() 引用的资源统一按名称索引，查得的 unique_id 自带资源类型。
     # model, seed, snapshot, function
     _lookup_types: ClassVar[set] = set(REFABLE_NODE_TYPES)
     _versioned_types: ClassVar[set] = set(VERSIONED_NODE_TYPES)
@@ -475,11 +477,13 @@ class SemanticModelByMeasureLookup(dbtClassMixin):
 
 # This handles both models/seeds/snapshots and sources/metrics/exposures/semantic_models
 class DisabledLookup(dbtClassMixin):
+    # 与 ref/doc 索引不同：值保存完整节点列表，同一名称可能对应多个禁用资源。
     def __init__(self, manifest: "Manifest") -> None:
         self.storage: Dict[str, Dict[PackageName, List[Any]]] = {}
         self.populate(manifest)
 
     def populate(self, manifest: "Manifest") -> None:
+        # disabled 的值本身是列表，先展开再逐个建立名称/项目索引。
         for node in list(chain.from_iterable(manifest.disabled.values())):
             self.add_node(node)
 
@@ -609,9 +613,11 @@ def build_node_edges(
     # pre-populate the forward edge dict for simplicity
     forward_edges: Dict[str, List[str]] = {n.unique_id: [] for n in nodes}
     for node in nodes:
+        # parent_map 复制当前直接依赖；这里只读 depends_on_nodes，不解析 node.refs。
         backward_edges[node.unique_id] = node.depends_on_nodes[:]
         for unique_id in backward_edges[node.unique_id]:
             if unique_id in forward_edges.keys():
+                # 反向记录 child_map：被依赖的上游 → 当前下游节点。
                 forward_edges[unique_id].append(node.unique_id)
     return _sort_values(forward_edges), _sort_values(backward_edges)
 
@@ -1221,6 +1227,7 @@ class Manifest(MacroMethods, dbtClassMixin):
         return copy
 
     def build_parent_and_child_maps(self) -> None:
+        # 汇总各类图资源，按现有依赖构图；若 refs 尚未处理，结果并非最终完整依赖图。
         edge_members = list(
             chain(
                 self.nodes.values(),
@@ -1396,6 +1403,7 @@ class Manifest(MacroMethods, dbtClassMixin):
         return self._doc_lookup
 
     def rebuild_doc_lookup(self) -> None:
+        # 仅重建文档名称索引，实际描述渲染在 process_docs 中完成。
         self._doc_lookup = DocLookup(self)
 
     @property
@@ -1434,6 +1442,7 @@ class Manifest(MacroMethods, dbtClassMixin):
         return self._semantic_model_by_measure_lookup
 
     def rebuild_ref_lookup(self) -> None:
+        # 新建查找对象替换旧索引，不在这里建立节点之间的依赖边。
         self._ref_lookup = RefableLookup(self)
 
     @property
@@ -1443,6 +1452,7 @@ class Manifest(MacroMethods, dbtClassMixin):
         return self._disabled_lookup
 
     def rebuild_disabled_lookup(self) -> None:
+        # 依据当前禁用集合重建索引，不会重新启用节点。
         self._disabled_lookup = DisabledLookup(self)
 
     @property

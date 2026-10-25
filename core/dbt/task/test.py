@@ -140,6 +140,8 @@ class TestRunner(CompileRunner):  # type: ignore[type-arg]
         self.print_start_line()
 
     def execute_data_test(self, data_test: TestNode, manifest: Manifest) -> TestResultData:
+        # 这是 test/build 的执行阶段，不属于 parse：运行测试物化宏，由适配器提交检查 SQL。
+        # not_null 查询空值行，unique 查询重复非空值分组；默认按检查结果行数统计失败数。
         context = generate_runtime_model_context(data_test, self.config, manifest)
 
         hook_ctx = self.adapter.pre_model_hook(context["config"])
@@ -168,6 +170,7 @@ class TestRunner(CompileRunner):  # type: ignore[type-arg]
 
         # load results from context
         # could eventually be returned directly by materialization
+        # 测试物化返回失败统计和判定标志，不是直接将所有违规数据行作为运行结果返回。
         result = context["load_result"]("main")
         table = result["table"]
         num_rows = len(table.rows)
@@ -291,6 +294,7 @@ class TestRunner(CompileRunner):  # type: ignore[type-arg]
             return self.build_test_run_result(test, test_result)
 
     def build_test_run_result(self, test: TestNode, result: TestResultData) -> RunResult:
+        # 按 severity、error_if、warn_if 对统计结果判定 PASS/FAIL/WARN，可由配置改变阈值。
         severity = test.config.severity.upper()
         thread_id = threading.current_thread().name
         num_errors = pluralize(result.failures, "result")

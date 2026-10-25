@@ -29,6 +29,7 @@ class _OsiFileContext:
 
 
 def _scan_osi_directories(project_root: str, osi_paths: List[str]) -> List[Path]:
+    # 当前加载阶段重新扫描配置目录下的 JSON；不是直接使用读取阶段登记的文件内容。
     files: List[Path] = []
     seen: set = set()
     for osi_path in osi_paths:
@@ -155,6 +156,7 @@ def _process_osi_file(
             f"Supported versions: {sorted(SUPPORTED_OSI_VERSIONS)}"
         )
 
+    # 将 OSI 定义转换为语义模型和指标，后续关联已解析的 dbt 模型并写入 Manifest。
     result = OSIToMSIConverter().convert(doc)
 
     for issue in result.issues:
@@ -212,10 +214,12 @@ def load_osi_into_manifest(
 ) -> None:
     # Clear any OSI-attributed nodes from a prior load (e.g., partial parse replay).
     # Must run before the early-return so deleted OSI files don't leave stale nodes.
+    # 先清除旧内存结果，确保删除 OSI 文件后不会残留语义节点；不删除磁盘文件。
     _clear_osi_attributed_nodes(manifest, osi_paths)
 
     files = _scan_osi_directories(project_root, osi_paths)
     if not files:
+        # 当前人员示例使用 YAML 内联语义定义，没有 OSI 文件，因此在这里结束。
         return
 
     project_root_path = Path(project_root)

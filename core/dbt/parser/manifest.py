@@ -496,11 +496,13 @@ class ManifestLoader:
             # load up the Lookup objects to resolve them by name, so the SourceFiles store
             # the unique_id instead of the name. Sources are loaded from yaml files, so
             # aren't in place yet
+            # 为已解析资源建立名称索引；这里只准备查找工具，还不处理 SQL 中的 ref()。
             self.manifest.rebuild_ref_lookup()
             self.manifest.rebuild_doc_lookup()
             self.manifest.rebuild_disabled_lookup()
 
             # Load yaml files
+            # 复用项目调度器，但本轮只处理 YAML：补充已有模型属性并创建测试等资源。
             parser_types = [SchemaParser]  # type: ignore
             for project in self.all_projects.values():
                 if project.project_name not in project_parser_files:
@@ -509,6 +511,7 @@ class ManifestLoader:
                     project, project_parser_files[project.project_name], parser_types
                 )
 
+            # YAML 配置可能改变 enabled，需要重新整理正常节点与禁用节点的归属。
             self.cleanup_disabled()
 
             self._perf_info.parse_project_elapsed = time.perf_counter() - start_parse_projects
@@ -519,6 +522,7 @@ class ManifestLoader:
             start_patch = time.perf_counter()
             patcher = SourcePatcher(self.root_project, self.manifest)
             patcher.construct_sources()
+            # construct_sources 不返回集合；最终数据源定义收集在 patcher.sources 中。
             self.manifest.sources = patcher.sources
             self._perf_info.patch_sources_elapsed = time.perf_counter() - start_patch
 
@@ -526,15 +530,18 @@ class ManifestLoader:
             self.manifest.rebuild_disabled_lookup()
 
             # copy the selectors from the root_project to the manifest
+            # 保存命名选择规则，并不在解析阶段执行资源筛选。
             self.manifest.selectors = self.root_project.manifest_selectors
 
             # inject any available external nodes
+            # 仅索引当前已有的依赖 ID，供外部节点清理使用；后面才处理尚未解析的 refs。
             self.manifest.build_parent_and_child_maps()
             external_nodes_modified = self.inject_external_nodes()
             if external_nodes_modified:
                 self.manifest.rebuild_ref_lookup()
 
             # Must run after model parsing (lookup complete) and before process_refs.
+            # 读取阶段只登记了 OSI 文件；这里在模型就绪后转换语义定义，无文件则返回。
             load_osi_into_manifest(
                 self.root_project.project_root,
                 self.root_project.project_name,
@@ -546,6 +553,7 @@ class ManifestLoader:
             # These check the created_at time on the nodes to
             # determine whether they need processing.
             start_process = time.perf_counter()
+            # source()/ref() 引用转成依赖 ID，不会把模型 raw_code 编译成最终 SQL。
             self.process_sources(self.root_project.project_name)
             self.process_refs(self.root_project.project_name, self.root_project.dependencies)
             self.process_unit_tests()
@@ -927,6 +935,7 @@ class ManifestLoader:
                 # 本方法也被后续 YAML 阶段复用；当前 ModelParser 不进入此分支。
                 if isinstance(parser, SchemaParser):
                     assert isinstance(block.file, SchemaSourceFile)
+                    # 完整解析使用已读入的 YAML 字典，部分解析使用筛选后的 pp_dict。
                     if self.partially_parsing:
                         dct = block.file.pp_dict
                     else:
@@ -1008,6 +1017,7 @@ class ManifestLoader:
             raise
 
     def inject_external_nodes(self) -> bool:
+        # 外部节点来自插件，不包括 seed、本地模型或适配器宏；没有增删时返回 False。
         # Remove previously existing external nodes since we are regenerating them
         manifest_nodes_modified = False
         # Remove all dependent nodes before removing referencing nodes
@@ -1323,6 +1333,7 @@ class ManifestLoader:
     # Takes references in 'refs' array of nodes and exposures, finds the target
     # node, and updates 'depends_on.nodes' with the unique id
     def process_refs(self, current_project: str, dependencies: Optional[Mapping[str, Project]]):
+        # 只处理本轮新建或更新的资源；缓存中未改变的节点保留已有依赖。
         for node in self.manifest.nodes.values():
             if node.created_at < self.started_at:
                 continue
@@ -1338,6 +1349,7 @@ class ManifestLoader:
         for semantic_model in self.manifest.semantic_models.values():
             if semantic_model.created_at < self.started_at:
                 continue
+            # 同名语义模型与 SQL 模型是不同资源：前者引用后者，后者再引用其上游。
             _process_refs(self.manifest, current_project, semantic_model, dependencies)
             self.update_semantic_model(semantic_model)
         for function in self.manifest.functions.values():
@@ -1348,6 +1360,7 @@ class ManifestLoader:
     # Takes references in 'metrics' array of nodes and exposures, finds the target
     # node, and updates 'depends_on.nodes' with the unique id
     def process_metrics(self, config: RuntimeConfig):
+        # 指标的 name/agg/expr 等已在 YAML 解析时保存，这里主要补充依赖关系。
         current_project = config.project_name
         for metric in self.manifest.metrics.values():
             if metric.created_at < self.started_at:
@@ -1357,6 +1370,7 @@ class ManifestLoader:
         for node in self.manifest.nodes.values():
             if node.created_at < self.started_at:
                 continue
+            # 外层遍历不为空，不代表 node.metrics 有内容；普通模型可能没有指标引用。
             _process_metrics_for_node(self.manifest, current_project, node)
         for exposure in self.manifest.exposures.values():
             if exposure.created_at < self.started_at:
@@ -1365,6 +1379,7 @@ class ManifestLoader:
 
     def process_saved_queries(self, config: RuntimeConfig):
         """Processes SavedQuery nodes to populate their `depends_on`."""
+        # 保存查询是指标/分组/筛选的命名定义，不是结果缓存；这里不执行查询。
         # Note: This will also capture various nodes which have been re-parsed
         # because they refer to some other changed node, so there will be
         # false positives. Ideally we would compare actual changes.
@@ -1383,6 +1398,7 @@ class ManifestLoader:
             return
 
         current_project = config.project_name
+        # 即使语义模型或指标更新了，这个集合也可能为空，此时无需补充查询依赖。
         for saved_query in self.manifest.saved_queries.values():
             # TODO:
             # 1. process `where` of SavedQuery for `depends_on`s
@@ -1391,6 +1407,7 @@ class ManifestLoader:
 
     def process_model_inferred_primary_keys(self):
         """Processes Model nodes to populate their `primary_key`."""
+        # 根据约束和测试声明推断元数据，不执行测试，也不创建数据库主键约束。
         model_to_generic_test_map: Dict[str, List[GenericTestNode]] = {}
         for node in self.manifest.nodes.values():
             if not isinstance(node, ModelNode):
@@ -1402,10 +1419,12 @@ class ManifestLoader:
             generic_tests: List[GenericTestNode] = []
             if node.unique_id in model_to_generic_test_map:
                 generic_tests = model_to_generic_test_map[node.unique_id]
+            # 例如 mart_people.id 同时声明 unique、not_null，推断结果为 ["id"]。
             primary_key = node.infer_primary_key(generic_tests)
             node.primary_key = sorted(primary_key)
 
     def update_semantic_model(self, semantic_model) -> None:
+        # 引用解析完成后，从关联 SQL 模型补齐实际数据库、schema 和关系名称。
         # This has to be done at the end of parsing because the referenced model
         # might have alias/schema/database fields that are updated by yaml config.
         if semantic_model.depends_on_nodes:
@@ -1424,6 +1443,7 @@ class ManifestLoader:
     # metrics: metric descriptions
     # semantic_models: semantic model descriptions
     def process_docs(self, config: RuntimeConfig):
+        # 渲染资源描述中的 doc() 等表达式，不处理模型 SQL，也不生成文档网站。
         for node in self.manifest.nodes.values():
             if node.created_at < self.started_at:
                 continue
@@ -1512,6 +1532,7 @@ class ManifestLoader:
     # 'unit_test' array finds the node and updates the
     # 'depends_on.nodes' array with the unique id
     def process_unit_tests(self):
+        # 只处理 YAML unit_tests 定义；not_null/unique 数据测试不在这个集合中。
         models_to_versions = None
         unit_test_unique_ids = list(self.manifest.unit_tests.keys())
         for unit_test_unique_id in unit_test_unique_ids:
@@ -1525,12 +1546,14 @@ class ManifestLoader:
                 continue
             if not models_to_versions:
                 models_to_versions = _build_model_names_to_versions(self.manifest)
+            # 这里才解析被测模型并登记依赖，随后处理启用状态和版本；不运行测试。
             process_models_for_unit_test(self.manifest, unit_test, models_to_versions)
 
     # Loops through all nodes, for each element in
     # 'functions' array finds the node and updates the
     # 'depends_on.nodes' array with the unique id
     def process_functions(self, current_project: str):
+        # 处理 dbt 函数资源引用；SQL 中普通的数据库内置 upper(name) 不属于此类引用。
         for node in self.manifest.nodes.values():
             if node.created_at < self.started_at:
                 continue
@@ -1542,6 +1565,7 @@ class ManifestLoader:
             _process_functions_for_node(self.manifest, current_project, function)
 
     def cleanup_disabled(self):
+        # YAML 处理后重新按 enabled 分流；只调整内存集合，不删除文件或数据库表。
         # make sure the nodes are in the manifest.nodes or the disabled dict,
         # correctly now that the schema files are also parsed
         disabled_nodes = []
@@ -1549,9 +1573,11 @@ class ManifestLoader:
             if not node.config.enabled:
                 disabled_nodes.append(node.unique_id)
                 self.manifest.add_disabled_nofile(node)
+        # 遍历结束后再删除，避免迭代 nodes 字典时改变大小。
         for unique_id in disabled_nodes:
             self.manifest.nodes.pop(unique_id)
 
+        # 用副本遍历禁用集合，将已经启用的资源转回 nodes。
         disabled_copy = deepcopy(self.manifest.disabled)
         for disabled in disabled_copy.values():
             for node in disabled:
@@ -1741,6 +1767,7 @@ class ManifestLoader:
 
     def build_model_to_generic_tests_map(self) -> Dict[str, List[GenericTestNode]]:
         """Return a list of generic tests that are attached to the given model, including disabled tests"""
+        # 按测试的 attached_node 分组，收集各模型的通用测试，供主键推断读取声明。
         model_to_generic_tests_map: Dict[str, List[GenericTestNode]] = {}
         for _, node in self.manifest.nodes.items():
             if isinstance(node, GenericTestNode) and node.attached_node:
@@ -1998,9 +2025,11 @@ def _process_docs_for_node(
     node: ManifestNode,
     manifest: Manifest,
 ):
+    # 记录引用的文档块 ID，再将描述渲染成正文；纯文字描述保持不变，doc_blocks 为空。
     node.doc_blocks = _get_doc_blocks(node.description, manifest, node.package_name)
     node.description = get_rendered(node.description, context)
 
+    # 列描述也单独处理，修改的是现有节点对象中的列属性。
     for column_name, column in node.columns.items():
         column.doc_blocks = _get_doc_blocks(column.description, manifest, node.package_name)
         column.description = get_rendered(column.description, context)
@@ -2083,6 +2112,7 @@ def _process_refs(
                 f"Refs should always be 1 or 2 arguments - got {len(ref.positional_args)}"
             )
 
+        # 按引用名称、项目和版本查索引；完整 unique_id 已包含 model/seed 等资源类型。
         target_model = manifest.resolve_ref(
             node,
             target_model_name,
@@ -2127,6 +2157,7 @@ def _process_refs(
                 node, target_model, ref.package, current_project
             )
 
+        # 保存直接上游的 ID，不把间接祖先展开，也不替换 raw_code 中的 Jinja 文本。
         target_model_id = target_model.unique_id
         node.depends_on.add_node(target_model_id)
 
@@ -2275,6 +2306,7 @@ def _process_metric_node(
         else:
             # v2 dependencies
             if metric.type is MetricType.SIMPLE:
+                # v2 简单指标的聚合参数已记录所属语义模型；本例 people_count 对应 mart_people。
                 semantic_model_dependency = metric.type_params.get_semantic_model_name()
                 if semantic_model_dependency is None:
                     raise dbt.exceptions.ParsingError(
@@ -2284,6 +2316,7 @@ def _process_metric_node(
                 unique_id = (
                     f"{NodeType.SemanticModel}.{current_project}.{semantic_model_dependency}"
                 )
+                # 当前分支直接拼接语义模型 ID 并登记，不通过 resolve_ref，也不执行聚合 SQL。
                 metric.depends_on.add_node(unique_id)
             if metric.type is MetricType.CUMULATIVE:
                 cumulative_type_params = metric.type_params.cumulative_type_params
@@ -2391,6 +2424,7 @@ def _process_metrics_for_node(
     elif isinstance(node, SavedQuery):
         metrics = [[metric] for metric in node.metrics]
     else:
+        # 这是当前节点的指标引用列表，不是 manifest.metrics 中的指标定义集合。
         metrics = node.metrics
 
     for metric in metrics:

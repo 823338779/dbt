@@ -53,6 +53,7 @@ class SourcePatcher:
         self.manifest = manifest
         self.generic_test_parsers: Dict[str, SchemaGenericTestParser] = {}
         self.patches_used: Dict[SourceKey, Set[str]] = {}
+        # 收集最终数据源定义；construct_sources 完成后由 load 回填 manifest.sources。
         self.sources: Dict[str, SourceDefinition] = {}
         self._deprecations: Set[Any] = set()
 
@@ -60,6 +61,7 @@ class SourcePatcher:
     # the UnpatchedSourceDefinitions in the manifest and combines them
     # with SourcePatches to produce SourceDefinitions.
     def construct_sources(self) -> None:
+        # 处理 YAML sources 声明，不处理 CSV seed；无数据源条目时循环不进入。
         for unique_id, unpatched in self.manifest.sources.items():
             schema_file = self.manifest.files[unpatched.file_id]
             if isinstance(unpatched, SourceDefinition):
@@ -68,12 +70,14 @@ class SourcePatcher:
                 self.sources[unpatched.unique_id] = unpatched
                 continue
             # returns None if there is no patch
+            # 查找可用的覆盖声明，无覆盖时 patch_source 保留原中间对象。
             patch = self.get_patch_for(unpatched)
 
             # returns unpatched if there is no patch
             patched = self.patch_source(unpatched, patch)
 
             # now use the patched UnpatchedSourceDefinition to extract test data.
+            # 创建数据源表/列的测试节点，只解析和登记，不执行测试 SQL。
             for test in self.get_source_tests(patched):
                 if test.config.enabled:
                     self.manifest.add_node_nofile(test)
@@ -85,6 +89,7 @@ class SourcePatcher:
                 schema_file.add_test(test.unique_id, test_from)
 
             # Convert UnpatchedSourceDefinition to a SourceDefinition
+            # 中间对象转换为最终 SourceDefinition，再按 enabled 分流。
             parsed = self.parse_source(patched)
             if parsed.config.enabled:
                 self.sources[unique_id] = parsed

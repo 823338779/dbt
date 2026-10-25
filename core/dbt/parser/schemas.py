@@ -216,12 +216,14 @@ class SchemaParser(SimpleParser[YamlBlock, ModelNode]):
         return NodeType.Test
 
     def parse_file(self, block: FileBlock, dct: Optional[Dict] = None) -> None:
+        # 文件与 YAML 字典已在读取阶段准备好；这里按顶层键分派，不依赖 YAML 文件名。
         assert isinstance(block.file, SchemaSourceFile)
 
         # If partially parsing, dct should be from pp_dict, otherwise
         # dict_from_yaml
         if dct:
             # contains the FileBlock and the data (dictionary)
+            # 将原文件对象与字典放在一起，没有重新读取磁盘或创建模型节点。
             yaml_block = YamlBlock.from_file_block(block, dct)
             parser: YamlReader
 
@@ -232,7 +234,9 @@ class SchemaParser(SimpleParser[YamlBlock, ModelNode]):
             if "models" in dct:
                 # the models are already in the manifest as nodes when we reach this code,
                 # even if they are disabled in the schema file
+                # parse 内部直接修改共享 Manifest 中的模型属性，返回值另外携带测试块。
                 model_parse_result = ModelPatchParser(self, yaml_block, "models").parse()
+                # 未配置版本的模型也使用 VersionedTestBlock，再从中解析各项测试声明。
                 for versioned_test_block in model_parse_result.versioned_test_blocks:
                     self.generic_test_parser.parse_versioned_tests(versioned_test_block)
 
@@ -440,6 +444,7 @@ class YamlReader(metaclass=ABCMeta):
     # get the list of dicts pointed to by the key in the yaml config,
     # ensure that the dicts have string keys
     def get_key_dicts(self) -> Iterable[Dict[str, Any]]:
+        # self.key 为 models 时取模型条目列表；同一个 YAML 可以描述多个模型。
         data = self.yaml.data.get(self.key, [])
         if not isinstance(data, list):
             raise ParsingError(
@@ -476,6 +481,7 @@ class YamlReader(metaclass=ABCMeta):
 
             # Render the data (except for tests, data_tests and descriptions).
             # See the SchemaYamlRenderer
+            # 描述和测试内容留到后续阶段；本例普通字面量渲染后不变。
             entry = self.render_entry(entry)
 
             schema_file = self.yaml.file
@@ -500,6 +506,7 @@ class YamlReader(metaclass=ABCMeta):
                     schema_file.add_env_var(var, self.key, entry["name"])
                 self.schema_yaml_vars.env_vars = {}
 
+            # 先交回条目字典，尚未转换成 UnparsedModelUpdate 等属性更新对象。
             yield entry
 
     def render_entry(self, dct):
@@ -622,6 +629,7 @@ class PatchParser(YamlReader, Generic[NonSourceTarget, Parsed]):
         # UnparsedMacroUpdate (MacroPatchParser, 'macros')
         #      = HasDocs
         # correspond to this parser's 'key'
+        # ModelPatchParser 继承此方法；这里的 node 是 YAML 更新对象，不是 SQL ModelNode。
         for node in self.get_unparsed_target():
             # node_block is a TargetBlock (Macro or Analysis)
             # or a TestBlock (all of the others)
@@ -629,6 +637,7 @@ class PatchParser(YamlReader, Generic[NonSourceTarget, Parsed]):
             if isinstance(node_block, TestBlock):
                 # TestablePatchParser = seeds, snapshots
                 test_blocks.append(node_block)
+            # VersionedTestBlock 继承 TestBlock，因此模型块会同时进入两个列表。
             if isinstance(node_block, VersionedTestBlock):
                 # models
                 versioned_test_blocks.append(node_block)
@@ -639,6 +648,7 @@ class PatchParser(YamlReader, Generic[NonSourceTarget, Parsed]):
                 refs = ParserRef()
 
             # There's no unique_id on the node yet so cannot add to disabled dict
+            # 除了收集返回的测试块，还在这里把 YAML 属性补充到已有模型节点。
             self.parse_patch(node_block, refs)
 
         return ParseResult(test_blocks, versioned_test_blocks)
@@ -652,6 +662,7 @@ class PatchParser(YamlReader, Generic[NonSourceTarget, Parsed]):
         for data in key_dicts:
             # add extra data to each dict. This updates the dicts
             # in the parser yaml
+            # 给 YAML 条目补充来源文件、资源类别和项目名称，供后续关联与报错使用。
             data.update(
                 {
                     "original_file_path": path,
@@ -672,6 +683,7 @@ class PatchParser(YamlReader, Generic[NonSourceTarget, Parsed]):
                     self.normalize_access_attribute(data, path)
                 # `tests` has been deprecated, convert to `data_tests` here if present
                 self.validate_data_tests(data)
+                # 动态调用子类的目标类型；模型条目转换为 UnparsedModelUpdate。
                 node = self._target_type().from_dict(data)
             except (ValidationError, JSONValidationError) as exc:
                 raise YamlParseDictError(path, self.key, data, exc)
@@ -812,6 +824,7 @@ class NodePatchParser(PatchParser[NodeTarget, ParsedNodePatch], Generic[NodeTarg
             yaml_key=block.target.yaml_key,
             package_name=block.target.package_name,
             description=block.target.description,
+            # ParserRef 此处整理的是列属性，不能与 SQL 中的 ref() 引用混淆。
             columns=refs.column_info,
             meta=block.target.meta,
             docs=block.target.docs,
@@ -830,6 +843,7 @@ class NodePatchParser(PatchParser[NodeTarget, ParsedNodePatch], Generic[NodeTarg
         )
 
     def parse_patch(self, block: TargetBlock[NodeTarget], refs: ParserRef) -> None:
+        # 将更新对象整理成 patch，再按名称定位已有资源；本例名称为 mart_people。
         patch = self._get_node_patch(block, refs)
 
         assert isinstance(self.yaml.file, SchemaSourceFile)
@@ -837,6 +851,7 @@ class NodePatchParser(PatchParser[NodeTarget, ParsedNodePatch], Generic[NodeTarg
 
         # TODO: I'd like to refactor this out but the early return makes doing so a bit messy
         if patch.yaml_key in ["models", "seeds", "snapshots"]:
+            # 优先查当前项目，再尝试不指定项目；索引返回的是完整资源 ID。
             unique_id = self.manifest.ref_lookup.get_unique_id(
                 patch.name, self.project.project_name, None
             ) or self.manifest.ref_lookup.get_unique_id(patch.name, None, None)
@@ -911,6 +926,7 @@ class NodePatchParser(PatchParser[NodeTarget, ParsedNodePatch], Generic[NodeTarg
         if patch.yaml_key == "functions":
             node = self.manifest.functions.get(unique_id)  # type: ignore[arg-type]
         else:
+            # 取得 Manifest 中原对象的引用，不是副本；后面的属性赋值立即反映到 Manifest。
             node = self.manifest.nodes.get(unique_id)  # type: ignore[arg-type]
 
         if node:
@@ -929,6 +945,7 @@ class NodePatchParser(PatchParser[NodeTarget, ParsedNodePatch], Generic[NodeTarg
 
     def patch_node_properties(self, node, patch: "ParsedNodePatch") -> None:
         """Given a ParsedNodePatch, add the new information to the node."""
+        # 原地补充属性即可，无需再次 add_node；例如 columns 中加入 YAML 声明的 id 列。
         # explicitly pick out the parts to update so we don't inadvertently
         # step on the model name or anything
         # Note: config should already be updated
@@ -986,6 +1003,7 @@ class ModelPatchParser(NodePatchParser[UnparsedModelUpdate]):
 
         versions = target.versions
         if not versions:
+            # mart_people 没有模型版本，交给父类按普通模型定位并更新属性。
             super().parse_patch(block, refs)
         else:
             assert isinstance(self.yaml.file, SchemaSourceFile)
@@ -1141,6 +1159,7 @@ class ModelPatchParser(NodePatchParser[UnparsedModelUpdate]):
             and patch.semantic_model.enabled is not False
         )
         if semantic_model_enabled:
+            # v2 内联定义在模型属性更新时产生语义模型和指标，分别存入独立 Manifest 集合。
             from dbt.parser.schema_yaml_readers import SemanticModelParser
 
             semantic_model_parser = SemanticModelParser(self.schema_parser, self.yaml)

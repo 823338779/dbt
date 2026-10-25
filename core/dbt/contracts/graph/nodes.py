@@ -613,6 +613,7 @@ class ModelNode(ModelResource, CompiledNode):
         3. Columns with enabled unique or dbt_utils.unique_combination_of_columns data tests
         4. Columns with disabled unique or dbt_utils.unique_combination_of_columns data tests
         """
+        # 优先使用显式主键约束；此方法只推断元数据，不检查数据库中的实际数据。
         for constraint in self.constraints:
             if constraint.type == ConstraintType.primary_key:
                 return constraint.columns
@@ -622,6 +623,7 @@ class ModelNode(ModelResource, CompiledNode):
                 if column_constraint.type == ConstraintType.primary_key:
                     return [column]
 
+        # 读取测试声明而非执行结果；人员示例的两个测试都指向 column_name=id。
         columns_with_enabled_unique_tests = set()
         columns_with_disabled_unique_tests = set()
         columns_with_not_null_tests = set()
@@ -657,6 +659,7 @@ class ModelNode(ModelResource, CompiledNode):
                 or column in columns_with_disabled_unique_tests
             ):
                 columns_with_unique_and_not_null_tests.append(column)
+        # 本例 id 同时出现在唯一性与非空测试集合中，返回 ["id"]。
         if columns_with_unique_and_not_null_tests:
             return columns_with_unique_and_not_null_tests
 

@@ -114,6 +114,7 @@ class TestBuilder(Generic[Testable]):
         test_name, test_args = self.extract_test_args(
             data_test, target.original_file_path, target.name, column_name, package_name
         )
+        # 本例拆出 name=not_null、args={"column_name": "id"}，还不是可执行 SQL。
         self.args: Dict[str, Any] = test_args
         if "model" in self.args:
             raise TestArgIncludesModelError()
@@ -122,6 +123,7 @@ class TestBuilder(Generic[Testable]):
         self.version: Optional[NodeVersion] = version
         self.render_ctx: Dict[str, Any] = render_ctx
         self.column_name: Optional[str] = column_name
+        # model 参数由 dbt 自动注入；此处生成 Jinja 字符串，不执行 ref() 或数据库查询。
         self.args["model"] = self.build_model_str()
 
         match = self.TEST_NAME_PATTERN.match(test_name)
@@ -129,6 +131,7 @@ class TestBuilder(Generic[Testable]):
             raise UnexpectedTestNamePatternError(test_name)
 
         groups = match.groupdict()
+        # 未写包名前缀的 not_null 得到 name=not_null、namespace=None。
         self.name: str = groups["test_name"]
         self.namespace: str = groups["test_namespace"]
         self.config: Dict[str, Any] = {}
@@ -246,6 +249,7 @@ class TestBuilder(Generic[Testable]):
             raise TestArgsNotDictError(test_args)
         if not isinstance(test_name, str):
             raise TestNameNotStringError(test_name)
+        # 复制参数后补入列名，因此 YAML 中的空参数字典也能得到 column_name。
         test_args = deepcopy(test_args)
         if column_name is not None:
             test_args["column_name"] = column_name
@@ -351,6 +355,7 @@ class TestBuilder(Generic[Testable]):
         )
 
     def build_model_str(self):
+        # 模型测试用 ref、数据源测试用 source；get_where_subquery 为后续过滤准备包装。
         targ = self.target
         if isinstance(self.target, UnparsedModelUpdate):
             if self.version:
