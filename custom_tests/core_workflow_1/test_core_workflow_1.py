@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,24 @@ def test_01_parse_project(dbt_project: Path) -> None:
     assert nodes["model.custom_test_dbt.stg_people"].config.materialized == "view"
     assert nodes["model.custom_test_dbt.mart_people"].config.materialized == "table"
 
+    # 语义模型与指标独立存储，不属于 manifest.nodes 中的 SQL 模型。
+    semantic_model = result.result.semantic_models["semantic_model.custom_test_dbt.mart_people"]
+    assert semantic_model.depends_on.nodes == ["model.custom_test_dbt.mart_people"]
+    assert [(entity.name, entity.type.value, entity.expr) for entity in semantic_model.entities] == [
+        ("person", "primary", "id")
+    ]
+    dimensions = {dimension.name: dimension for dimension in semantic_model.dimensions}
+    assert dimensions["person_name"].type.value == "categorical"
+    assert dimensions["person_name"].expr == "name"
+    assert dimensions["registered_on"].type.value == "time"
+    assert semantic_model.defaults.agg_time_dimension == "registered_on"
+    metric = result.result.metrics["metric.custom_test_dbt.people_count"]
+    assert metric.type.value == "simple"
+    assert "semantic_model.custom_test_dbt.mart_people" in metric.depends_on.nodes
+    assert metric.type_params.metric_aggregation_params.agg.value == "count"
+    assert metric.type_params.expr == "id"
+    assert nodes["model.custom_test_dbt.time_spine"].time_spine.standard_granularity_column == "date_day"
+
 
 def test_02_select_model_and_ancestors(dbt_project: Path) -> None:
     """Selecting a model with + includes its upstream seed and model."""
@@ -50,7 +69,7 @@ def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQ
 
     assert result.success, result.exception
     assert isinstance(result.result, RunExecutionResult)
-    assert len(result.result.results) == 7  # One seed, two models, four column tests.
+    assert len(result.result.results) == 8  # One seed, three models, four column tests.
     assert {node.status for node in result.result.results} == {"success", "pass"}
 
     with starrocks_connection.cursor() as cursor:
@@ -61,12 +80,14 @@ def test_03_build_and_query_models(dbt_project: Path, starrocks_connection: MySQ
         )
         assert cursor.fetchall() == [("mart_people", "BASE TABLE"), ("stg_people", "VIEW")]
 
-        cursor.execute(f"select id, name from `{schema}`.mart_people order by id")
+        cursor.execute(f"select id, name, registered_on from `{schema}`.mart_people order by id")
         assert cursor.fetchall() == [
-            (1, "ADA"),
-            (2, "GRACE"),
-            (3, "ALAN"),
+            (1, "ADA", date(2026, 1, 1)),
+            (2, "GRACE", date(2026, 1, 1)),
+            (3, "ALAN", date(2026, 1, 2)),
         ]
+        cursor.execute(f"select date_day from `{schema}`.time_spine order by date_day")
+        assert cursor.fetchall() == [(date(2026, 1, 1),), (date(2026, 1, 2),)]
 
 
 def test_04_run_data_tests(dbt_project: Path) -> None:

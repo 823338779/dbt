@@ -1,0 +1,10 @@
+version: 2
+
+models:
+  - name: time_spine
+    description: MetricFlow 使用的日粒度时间表，当前仅覆盖两天的教学数据。
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_day
+        granularity: day

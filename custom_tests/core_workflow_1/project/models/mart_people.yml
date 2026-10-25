@@ -2,6 +2,31 @@ version: 2
 
 models:
   - name: mart_people
+    description: 人员明细，每行一个人员；注册日期为学习示例中的模拟日期。
+    # v2 内联定义：解析模型属性时，同时创建语义模型和指标。
+    semantic_model: true
+    agg_time_dimension: registered_on
     columns:
       - name: id
+        description: 人员唯一标识。
         data_tests: [not_null, unique]
+        entity:
+          name: person
+          type: primary
+      - name: name
+        description: 大写姓名，可作为人数指标的分组维度。
+        dimension:
+          name: person_name
+          type: categorical
+      - name: registered_on
+        description: 模拟注册日期，也是人数指标的默认聚合时间维度。
+        granularity: day
+        dimension:
+          type: time
+    metrics:
+      - name: people_count
+        label: 人数
+        description: 按人员 ID 计数；每人一行，因此总人数为 3。
+        type: simple
+        agg: count
+        expr: id
