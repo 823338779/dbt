@@ -118,6 +118,7 @@ class Graph:
         removed nodes are preserved as explicit new edges.
         """
 
+        # 操作副本；删除未选中的中间节点时，还会补边保留跨节点的可达关系。
         new_graph: nx.DiGraph = self.graph.copy()
         include_nodes: Set[UniqueId] = set(selected)
 

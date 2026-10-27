@@ -132,8 +132,10 @@ class ConfiguredTask(BaseTask):
         super().__init__(args)
         self.config = config
         self.graph: Optional[Graph] = None
+        # 保存装饰器已解析的 Manifest 引用；初始化任务时不重新解析项目。
         self.manifest = manifest
         self.catalogs = catalogs
+        # 编译器供后续建图与节点编译使用，此处尚未编译业务 SQL。
         self.compiler = Compiler(self.config)
 
     def compile_manifest(self) -> None:

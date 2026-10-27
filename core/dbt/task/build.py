@@ -63,6 +63,7 @@ class BuildTask(RunTask):
         catalogs: Optional[List[Catalog]] = None,
     ) -> None:
         super().__init__(args, config, manifest, catalogs=catalogs)
+        # 指 YAML unit_tests，不是外层 pytest，也不是 not_null/unique 数据测试。
         self.selected_unit_tests: Set = set()
         self.model_to_unit_test_map: Dict[str, List] = {}
         self._unit_test_count_added: bool = False
@@ -114,6 +115,7 @@ class BuildTask(RunTask):
     # overrides get_graph_queue in runnable.py
     def get_graph_queue(self) -> GraphQueue:
         # Following uses self.selection_arg and self.exclusion_arg
+        # 生成选择规则，再按 build 支持的资源类型筛选；语义模型和指标不作为执行任务。
         spec = self.get_selection_spec()
 
         # selector including unit tests
@@ -130,12 +132,14 @@ class BuildTask(RunTask):
 
         # Get the difference in the sets of nodes with and without unit tests and
         # save it
+        # 差集分离 YAML 单元测试；本例差集为空，四个数据测试仍保留。
         selected_unit_tests = full_selected_nodes - selected_nodes_wo_unit_tests
         self.selected_unit_tests = selected_unit_tests
         self.build_model_to_unit_test_map(selected_unit_tests)
 
         # get_graph_queue in the selector will remove NodeTypes not specified
         # in the node_selector (filter_selection).
+        # 普通节点进入队列；unit_tests 另按模型映射处理，不独立进入队列。
         return selector_wo_unit_tests.get_graph_queue(spec)
 
     # overrides handle_job_queue in runnable.py
@@ -146,6 +150,7 @@ class BuildTask(RunTask):
         if not self._unit_test_count_added:
             self.num_nodes = self.num_nodes + len(self.selected_unit_tests)
             self._unit_test_count_added = True
+        # 取就绪节点并标记处理中；仍有下游但暂时无就绪节点时阻塞等待。
         node = self.job_queue.get()
         if (
             node.resource_type == NodeType.Model
@@ -199,6 +204,7 @@ class BuildTask(RunTask):
         return self.call_runner(runner, parent_context)
 
     # handle non-model-plus-unit-tests nodes
+    # 为普通节点创建对应 Runner，检查上游失败的跳过标记，再提交线程池。
     def handle_job_queue_node(self, node, pool, callback):
         self._raise_set_error()
         runner = self.get_runner(node)
@@ -255,6 +261,7 @@ class BuildTask(RunTask):
     def compile_manifest(self) -> None:
         if self.manifest is None:
             raise DbtInternalError("compile_manifest called before manifest was loaded")
+        # BuildTask 的实际建图入口：补充测试调度边并将返回图保存为 task.graph。
         self.graph: Graph = self.compiler.compile(
             self.manifest, add_test_edges=True, catalogs=self.catalogs
         )

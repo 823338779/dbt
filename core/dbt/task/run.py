@@ -1308,6 +1308,7 @@ class RunTask(CompileTask):
     def before_run(self, adapter: BaseAdapter, selected_uids: AbstractSet[str]) -> RunStatus:
         with adapter.connection_named("master"):
             self.defer_to_manifest()
+            # 收集模型所需 database/schema，准备命名空间与已有表、视图的关系缓存。
             required_schemas = self.get_model_schemas(adapter, selected_uids)
             with self._maybe_span("metadata.setup"):
                 self.create_schemas(adapter, required_schemas)
@@ -1315,6 +1316,7 @@ class RunTask(CompileTask):
             self.populate_microbatch_batches(selected_uids)
             self.populate_function_overloads(selected_uids)
             group_lookup.init(self.manifest, selected_uids)
+            # 执行项目运行前 hooks；此阶段可访问数据库，但还未构建业务模型。
             run_hooks_status = self.safe_run_hooks(adapter, RunHookType.Start, {})
             return run_hooks_status
 

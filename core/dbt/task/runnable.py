@@ -228,15 +228,18 @@ class GraphRunnableTask(ConfiguredTask):
         if self.manifest is None or self.graph is None:
             raise DbtInternalError("_runtime_initialize never loaded the graph!")
 
+        # 动态调用 BuildTask 的选择和队列构建，此时还未执行业务节点。
         self.job_queue = self.get_graph_queue()
 
         # Set selected node IDs on the compiler so FK constraint compilation
         # can determine whether to use deferred relations or current relations.
         # FK targets that ARE selected should use current relations (being built now).
         # FK targets that are NOT selected should use deferred relations (from state).
+        # 全部选中 ID 供外键约束编译判断当前/延迟引用关系，不只是就绪节点。
         self.compiler.selected_node_ids = set(self.job_queue.get_selected_nodes())
 
         # we use this a couple of times. order does not matter.
+        # 按 ID 获取 Manifest 原有节点对象的引用；该列表顺序不是执行顺序。
         self._flattened_nodes = []
         for uid in self.job_queue.get_selected_nodes():
             if uid in self.manifest.nodes:
@@ -256,6 +259,7 @@ class GraphRunnableTask(ConfiguredTask):
                     f"Node selection returned {uid}, expected an exposure, a function, a node, a saved query, a source, or a unit test"
                 )
 
+        # ephemeral 不独立物化，不计入执行数量；本例共 8 个节点。
         self.num_nodes = len([n for n in self._flattened_nodes if not n.is_ephemeral_model])
 
     def raise_on_first_error(self) -> bool:
@@ -285,6 +289,7 @@ class GraphRunnableTask(ConfiguredTask):
         if cls is None:
             raise DbtInternalError("Could not find runner type for node.")
 
+        # Runner 持有节点与数据库 adapter，按资源类型承担具体执行工作。
         runner = cls(self.config, adapter, node, run_count, num_nodes)
         # Propagate selected node IDs to the runner's compiler for FK constraint resolution
         runner.compiler.selected_node_ids = self.compiler.selected_node_ids
@@ -441,6 +446,7 @@ class GraphRunnableTask(ConfiguredTask):
         if self.config.args.single_threaded:
             callback(self.call_runner(*args))
         else:
+            # 将就绪任务交给线程池，完成后回调收集结果并推进依赖队列。
             pool.apply_async(self.call_runner, args=args, callback=callback)
 
     def _raise_set_error(self):
@@ -460,8 +466,10 @@ class GraphRunnableTask(ConfiguredTask):
 
             if self.job_queue is None:
                 raise DbtInternalError("Got to run_queue callback with no job queue set")
+            # 先处理结果及下游跳过状态，再释放依赖；完成并不一定代表成功。
             self.job_queue.mark_done(result.node.unique_id)
 
+        # 不是判断 inner.empty；还有等待依赖的节点时继续取，必要时阻塞。
         while not self.job_queue.empty():
             self.handle_job_queue(pool, callback)
 
@@ -575,6 +583,7 @@ class GraphRunnableTask(ConfiguredTask):
         pool.join()
 
     def execute_nodes(self):
+        # 依赖图决定执行资格，线程池大小限制并发；本例 threads=1。
         num_threads = self.config.threads
 
         pool = DbtThreadPool(
@@ -698,10 +707,12 @@ class GraphRunnableTask(ConfiguredTask):
 
         self.started_at = time.time()
         try:
+            # BuildTask → RunTask：准备 schema、关系缓存及 on-run-start hooks。
             before_run_status = self.before_run(adapter, selected_uids)
             if before_run_status == RunStatus.Success or (
                 not get_flags().skip_nodes_if_on_run_start_fails
             ):
+                # 满足运行条件后开始调度，各 Runner 负责具体 SQL 编译与执行。
                 res = self.execute_nodes()
             else:
                 executed_node_ids = {
@@ -756,6 +767,7 @@ class GraphRunnableTask(ConfiguredTask):
             _set_span_attr(invocation_span, "command", getattr(get_flags(), "WHICH", None))
             _set_span_attr(invocation_span, "invocation_id", get_invocation_id())
             _set_span_attr(invocation_span, "version", __version__)
+            # 先建图、选择节点和创建队列，再进入 execute_with_hooks。
             self._runtime_initialize()
 
             if self._flattened_nodes is None:

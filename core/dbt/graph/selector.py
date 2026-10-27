@@ -380,12 +380,15 @@ class NodeSelector(MethodManager):
         dependencies.
         """
         # Filtering happens in get_selected
+        # 返回选中资源的 unique_id 集合；本例共 8 个节点。
         selected_nodes = self.get_selected(spec)
         # Save to global variable
         selected_resources.set_selected_resources(selected_nodes)
         # Construct a new graph using the selected_nodes
+        # 复制本次执行子图，保留选中节点之间的依赖和测试调度边。
         new_graph = self.full_graph.get_subset_graph(selected_nodes)
         # should we give a way here for consumers to mutate the graph?
+        # 默认保留依赖；管理全部选中节点，但内部队列仅接纳当前就绪节点。
         return GraphQueue(new_graph.graph, self.manifest, selected_nodes, preserve_edges)
 
 

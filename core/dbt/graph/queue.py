@@ -36,6 +36,7 @@ class GraphQueue:
         # 'create_empty_copy' returns a copy of the graph G with all of the edges removed, and leaves nodes intact.
         self.graph = graph if preserve_edges else nx.classes.function.create_empty_copy(graph)
         self.manifest = manifest
+        # 保存全部选中节点，与 inner 中当前就绪的少量节点不同。
         self._selected = selected
         # store the queue as a priority queue.
         self.inner: PriorityQueue = PriorityQueue()
@@ -51,6 +52,7 @@ class GraphQueue:
         # store the 'score' of each node as a number. Lower is higher priority.
         self._scores = self._get_scores(self.graph)
         # populate the initial queue
+        # 初始仅加入入度为 0 的节点；本例是 people 和独立的 time_spine。
         self._find_new_additions(list(self.graph.nodes()))
         # awaits after task end
         self.some_task_done = threading.Condition(self.lock)
@@ -133,6 +135,7 @@ class GraphQueue:
         See `queue.PriorityQueue` for more information on `get()` behavior and
         exceptions.
         """
+        # 就绪队列暂时为空时等待；完成回调通过 mark_done 解锁下游后可继续取出。
         _, node_id = self.inner.get(block=block, timeout=timeout)
         node = self.manifest.expect(node_id)
         is_microbatch = (
@@ -152,6 +155,7 @@ class GraphQueue:
         This takes the lock.
         """
         with self.lock:
+            # 统计尚未取出的节点，包含等待依赖的节点，不是 inner 的长度。
             return len(self.graph) - len(self.in_progress)
 
     def empty(self) -> bool:
@@ -160,6 +164,7 @@ class GraphQueue:
 
         This takes the lock.
         """
+        # True 表示剩余节点均已取出，不代表执行结束；循环之后仍需 join 等待。
         return len(self) == 0
 
     def _already_known(self, node: UniqueId) -> bool:
@@ -178,6 +183,7 @@ class GraphQueue:
         queue and add them.
         """
         for node in candidates:
+            # 入度为 0 表示上游均已移除；同时避免重复加入已排队或处理中的节点。
             if self.graph.in_degree(node) == 0 and not self._already_known(node):
                 self.inner.put((self._scores[node], node))
                 self.queued.add(node)
@@ -193,6 +199,7 @@ class GraphQueue:
             self.in_progress.remove(node_id)
             if node_id in self.in_progress_microbatch:
                 self.in_progress_microbatch.remove(node_id)
+            # 先保存下游，再移除完成节点及其边，将新就绪的下游加入内部队列。
             successors = list(self.graph.successors(node_id))
             self.graph.remove_node(node_id)
             self._find_new_additions(successors)

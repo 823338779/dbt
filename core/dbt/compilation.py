@@ -178,6 +178,7 @@ class Linker:
         "indicate that node1 depends on node2"
         self.graph.add_node(node1)
         self.graph.add_node(node2)
+        # node1 依赖 node2；边按上游到下游记录，如 stg_people → mart_people。
         self.graph.add_edge(node2, node1)
 
     def add_node(self, node):
@@ -197,6 +198,7 @@ class Linker:
     def link_node(self, node: GraphMemberNode, manifest: Manifest):
         self.add_node(node.unique_id)
 
+        # 使用解析阶段已解析为 unique_id 的资源依赖；不把 depends_on.macros 加入调度图。
         for dependency in node.depends_on_nodes:
             if dependency in manifest.nodes:
                 self.dependency(node.unique_id, (manifest.nodes[dependency].unique_id))
@@ -211,6 +213,7 @@ class Linker:
             else:
                 raise GraphDependencyNotFoundError(node, dependency)
 
+    # 建图包含多种资源；是否执行还要由后续选择器按命令类型过滤。
     def link_graph(self, manifest: Manifest):
         for source in manifest.sources.values():
             self.add_node(source.unique_id)
@@ -229,12 +232,14 @@ class Linker:
         for saved_query in manifest.saved_queries.values():
             self.link_node(saved_query, manifest)
 
+        # 原始资源依赖建完后检查环，环形依赖无法按拓扑关系执行。
         cycle = self.find_cycles()
 
         if cycle:
             raise CompilationError("Found a cycle: {}".format(cycle))
 
     def add_test_edges(self, manifest: Manifest) -> None:
+        # build 补充上游测试到下游模型的等待边；两种算法保留相同的依赖可达关系。
         if not get_flags().USE_FAST_TEST_EDGES:
             self.add_test_edges_1(manifest)
         else:
@@ -328,6 +333,7 @@ class Linker:
                     # is a subset of all upstream nodes of the current node,
                     # add an edge from the upstream test to the current node.
                     if test_depends_on.issubset(upstream_nodes):
+                        # 只修改调度图，不回写模型 depends_on.nodes；多依赖测试需满足上游子集条件。
                         self.graph.add_edge(upstream_test, node_id, edge_type="parent_test")
 
     def add_test_edges_2(self, manifest: Manifest):
@@ -378,6 +384,7 @@ class Linker:
 
         # Now that we have all the necessary information conveniently organized,
         # add new edges for single-tested nodes.
+        # 单依赖测试：让被测模型的可执行下游等待测试，例如 stg_people 的测试 → mart_people。
         for node_id, test_ids in single_tested_nodes.items():
             succs = [s for s in graph.successors(node_id) if s in executable_nodes]
             for succ_id in succs:
@@ -480,6 +487,7 @@ class Linker:
             graph_nodes[node_index] = {"name": node_name, "type": data["resource_type"]}
 
         for node_index, node in graph_nodes.items():
+            # 摘要 succ 是下游节点的整数索引；测试 → 模型的边应查看测试条目的 succ。
             successors = [index_dict[n] for n in self.graph.successors(node["name"])]
             if successors:
                 node["succ"] = [index_dict[n] for n in self.graph.successors(node["name"])]
@@ -746,6 +754,7 @@ class Compiler:
         catalogs: Optional[Sequence[Any]] = None,
     ) -> Graph:
         self.initialize()
+        # 此处 compile 是构建执行依赖图，不是渲染模型 raw_code 中的 Jinja/ref。
         linker = Linker()
         linker.link_graph(manifest)
 
@@ -753,10 +762,12 @@ class Compiler:
         # supporting diagnostics and performance analysis.
         summaries: Dict = dict()
         summaries["_invocation_id"] = get_invocation_id()
+        # linked 保存补测试边之前的摘要，with_test_edges 保存同一张图补边后的摘要。
         summaries["linked"] = linker.get_graph_summary(manifest)
 
         # This is only called for the "build" command
         if add_test_edges:
+            # 刷新 Manifest 父子查询表，再为 build 添加等待上游测试的调度关系。
             manifest.build_parent_and_child_maps()
             linker.add_test_edges(manifest)
 
@@ -784,6 +795,7 @@ class Compiler:
             stats = _generate_stats(manifest, catalogs)
             print_compile_stats(stats)
 
+        # 返回 dbt Graph 包装对象；节点选择、队列创建和 SQL 执行都在后续阶段。
         return Graph(linker.graph)
 
     def write_graph_file(self, linker: Linker, manifest: Manifest):
