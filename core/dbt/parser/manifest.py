@@ -23,7 +23,7 @@ from typing import (
 
 import jinja2
 import msgpack
-from jinja2.nodes import Call, Const
+from jinja2.nodes import Call, Const, Name
 from metricflow_semantic_interfaces.enum_extension import assert_values_exhausted
 from metricflow_semantic_interfaces.type_enums import MetricType
 
@@ -1977,44 +1977,39 @@ def _get_doc_blocks(description: str, manifest: Manifest, node_package: str) -> 
     ast = parse(description)
     doc_blocks: List[str] = []
 
-    if not hasattr(ast, "body"):
-        return doc_blocks
+    # Calls may be nested inside if/for blocks, assignments, or expressions.
+    for node in ast.find_all(Call):
+        if (
+            not isinstance(node.node, Name)
+            or not hasattr(node.node, "name")
+            or node.node.name != "doc"
+        ):
+            continue
+        if node.dyn_args is not None or node.dyn_kwargs is not None or node.kwargs:
+            continue
 
-    for statement in ast.body:
-        for node in statement.nodes:
-            if (
-                isinstance(node, Call)
-                and hasattr(node, "node")
-                and hasattr(node, "args")
-                and hasattr(node.node, "name")
-                and node.node.name == "doc"
-            ):
-                # Only Const is statically resolvable to a block name at parse time.
-                #    * It does have a "value" attribute but mypy is unconvinced so the hasattr is to make it extra happy.
-                # Filter out Const values to avoid raising an unhandled exception attempting
-                # to statically parseother jinja expression nodes (ie Concat, CondExpr)
-                doc_args = [
-                    arg.value
-                    for arg in node.args
-                    if isinstance(arg, Const) and hasattr(arg, "value")
-                ]
+        # Only fully constant argument lists can be resolved statically. Filtering
+        # a mixed list would mistake a package name for a one-argument doc name.
+        doc_args = [
+            arg.value for arg in node.args if isinstance(arg, Const) and hasattr(arg, "value")
+        ]
+        if len(doc_args) != len(node.args):
+            continue
+        if len(doc_args) == 1:
+            package, name = None, doc_args[0]
+        elif len(doc_args) == 2:
+            package, name = doc_args
+        else:
+            continue
 
-                if len(doc_args) == 1:
-                    package, name = None, doc_args[0]
-                elif len(doc_args) == 2:
-                    package, name = doc_args
-                else:
-                    continue
+        if not manifest.metadata.project_name:
+            continue
 
-                if not manifest.metadata.project_name:
-                    continue
-
-                resolved_doc = manifest.resolve_doc(
-                    name, package, manifest.metadata.project_name, node_package
-                )
-
-                if resolved_doc:
-                    doc_blocks.append(resolved_doc.unique_id)
+        resolved_doc = manifest.resolve_doc(
+            name, package, manifest.metadata.project_name, node_package
+        )
+        if resolved_doc:
+            doc_blocks.append(resolved_doc.unique_id)
 
     return doc_blocks
 
