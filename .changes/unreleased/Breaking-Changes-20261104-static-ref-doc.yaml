@@ -1,0 +1,3 @@
+kind: Breaking Changes
+body: Expose ref and doc as explicit Python context functions. The built-in ref now takes precedence over same-name user macros; package-qualified macros and other macro overrides remain available. After upgrading, run dbt build --no-partial-parse once to regenerate any cached dependencies from the old ref behavior before returning to normal partial parsing.
+time: 2026-11-04T00:00:00.000000+00:00

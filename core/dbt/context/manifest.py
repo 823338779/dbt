@@ -15,8 +15,8 @@ class ManifestContext(ConfiguredContext):
     """The Macro context has everything in the target context, plus the macros
     in the manifest.
 
-    The given macros can override any previous context values, which will be
-    available as if they were accessed relative to the package name.
+    The given macros can override previous context values except the built-in
+    ref function. Macros remain available relative to their package name.
     """
 
     # subclasses are QueryHeaderContext and ProviderContext
@@ -58,18 +58,21 @@ class ManifestContext(ConfiguredContext):
     # This does not use the Mashumaro code
     def to_dict(self):
         dct = super().to_dict()
+        # Keep ref bound to its Python resolver without changing other macro overrides.
+        static_functions = {"ref": dct["ref"]} if "ref" in dct else {}
         # This moves all of the macros in the 'namespace' into top level
         # keys in the manifest dictionary
         if isinstance(self.namespace, TestMacroNamespace):
             dct.update(self.namespace.local_namespace)
             dct.update(self.namespace.project_namespace)
+            dct.update(static_functions)
             return dct
         else:
             # The following is a performance optimization which creates a "virtual"
             # copy of dct, updated with the values in namespace. The result is
             # called cm and by using a ChainMap it avoids the very large cost of
             # iterating every value of namespace.
-            cm = ChainMap(self.namespace, dct)
+            cm = ChainMap(static_functions, self.namespace, dct)
 
             # These next lines repair certain assumptions which were important
             # before the performance optimization:

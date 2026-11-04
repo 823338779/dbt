@@ -1,11 +1,15 @@
 import pytest
 
-from dbt.tests.util import run_dbt
+from dbt.tests.util import check_relations_equal, run_dbt
 
-# Custom ref macro that accepts and ignores a 'label' kwarg
+# A custom ref macro must be explicitly package-qualified. Unqualified ref
+# calls use label='staging' below, so invoking this macro for them would fail.
 macros__custom_ref_sql = """
 {% macro ref() %}
 {% set label = kwargs.get('label') %}
+{% if label != 'explicit' %}
+    {{ exceptions.raise_compiler_error('Custom ref must be explicitly package-qualified') }}
+{% endif %}
 {% set version = kwargs.get('version') or kwargs.get('v') %}
 {% set packagename = none %}
 {%- if (varargs | length) == 1 -%}
@@ -32,6 +36,10 @@ select 1 as id, 'alice' as name
 
 models__model_b_sql = """
 select * from {{ ref('model_a', label='staging') }}
+"""
+
+models__explicit_ref_sql = """
+select * from {{ test.ref('model_a', label='explicit') }}
 """
 
 models__schema_yml = """
@@ -77,7 +85,7 @@ unit_tests:
 
 
 class TestCustomRefKwargsUnitTest:
-    """Test that unit tests work with custom ref kwargs when flag is enabled."""
+    """The flag allows custom input kwargs without replacing the built-in ref."""
 
     @pytest.fixture(scope="class")
     def project_config_update(self):
@@ -93,6 +101,7 @@ class TestCustomRefKwargsUnitTest:
             "model_a.sql": models__model_a_sql,
             "model_b.sql": models__model_b_sql,
             "schema.yml": models__schema_yml,
+            "explicit_ref.sql": models__explicit_ref_sql,
         }
 
     @pytest.fixture(scope="class")
@@ -101,7 +110,8 @@ class TestCustomRefKwargsUnitTest:
 
     def test_unit_test_with_custom_ref_kwargs(self, project):
         results = run_dbt(["run"])
-        assert len(results) == 2
+        assert len(results) == 3
+        check_relations_equal(project.adapter, ["model_a", "model_b", "explicit_ref"])
 
         results = run_dbt(["test", "--select", "test_type:unit"])
         assert len(results) == 1
@@ -109,7 +119,7 @@ class TestCustomRefKwargsUnitTest:
 
 
 class TestCustomRefKwargsGenericTest:
-    """Test that generic data tests work with custom ref kwargs when flag is enabled."""
+    """Generic-test contexts also keep built-in ref precedence when the flag is enabled."""
 
     @pytest.fixture(scope="class")
     def project_config_update(self):
@@ -125,6 +135,7 @@ class TestCustomRefKwargsGenericTest:
             "model_a.sql": models__model_a_sql,
             "model_b.sql": models__model_b_sql,
             "schema.yml": models__schema_yml,
+            "explicit_ref.sql": models__explicit_ref_sql,
         }
 
     @pytest.fixture(scope="class")
@@ -133,7 +144,8 @@ class TestCustomRefKwargsGenericTest:
 
     def test_generic_test_with_custom_ref_kwargs(self, project):
         results = run_dbt(["run"])
-        assert len(results) == 2
+        assert len(results) == 3
+        check_relations_equal(project.adapter, ["model_a", "model_b", "explicit_ref"])
 
         results = run_dbt(["test", "--select", "test_type:data"])
         assert len(results) == 1

@@ -9,7 +9,7 @@ from {{ ref('seed_1') }}
 """
 
 macros__ref_override_macro_sql = """
--- Macro to override ref and always return the same result
+-- Explicitly callable as test.ref; unqualified ref keeps the built-in behavior
 {% macro ref(modelname) %}
 {% do return(builtins.ref(modelname).replace_path(identifier='seed_2')) %}
 {% endmacro %}
@@ -29,7 +29,11 @@ seeds__seed_1_csv = """a,b
 class TestRefOverride:
     @pytest.fixture(scope="class")
     def models(self):
-        return {"ref_override.sql": models__ref_override_sql}
+        return {
+            "ref_override.sql": models__ref_override_sql,
+            "builtin_ref.sql": "select * from {{ builtins.ref('seed_1') }}",
+            "explicit_ref_override.sql": "select * from {{ test.ref('seed_1') }}",
+        }
 
     @pytest.fixture(scope="class")
     def macros(self):
@@ -46,9 +50,10 @@ class TestRefOverride:
         run_dbt(["seed"])
         run_dbt(["run"])
 
-        # We want it to equal seed_2 and not seed_1. If it's
-        # still pointing at seed_1 then the override hasn't worked.
-        check_relations_equal(project.adapter, ["ref_override", "seed_2"])
+        # Top-level ref and builtins.ref keep the original target. A package
+        # qualifier explicitly opts into the project's custom ref macro.
+        check_relations_equal(project.adapter, ["ref_override", "builtin_ref", "seed_1"])
+        check_relations_equal(project.adapter, ["explicit_ref_override", "seed_2"])
 
 
 models__version_ref_override_sql = """
@@ -60,13 +65,13 @@ from {{ ref('versioned_model', version=1) }}
 models__package_ref_override_sql = """
 select
     *
-from {{ ref('package', 'versioned_model') }}
+from {{ ref('test', 'versioned_model') }}
 """
 
 models__package_version_ref_override_sql = """
 select
     *
-from {{ ref('package', 'versioned_model', version=1) }}
+from {{ ref('test', 'versioned_model', version=1) }}
 """
 
 models__v1_sql = """
@@ -86,7 +91,7 @@ models:
 """
 
 macros__package_version_ref_override_macro_sql = """
--- Macro to override ref and always return the same result
+-- Explicitly callable as test.ref; unqualified ref keeps the built-in behavior
 {% macro ref() %}
 -- extract user-provided positional and keyword arguments
 {% set version = kwargs.get('version') %}
@@ -118,6 +123,10 @@ class TestAdvancedRefOverride:
             "version_ref_override.sql": models__version_ref_override_sql,
             "package_ref_override.sql": models__package_ref_override_sql,
             "package_version_ref_override.sql": models__package_version_ref_override_sql,
+            "builtin_version_ref.sql": "select * from {{ builtins.ref('versioned_model', v=1) }}",
+            "explicit_version_ref_override.sql": "select * from {{ test.ref('versioned_model', version=1) }}",
+            "explicit_package_ref_override.sql": "select * from {{ test.ref('package', 'versioned_model') }}",
+            "explicit_package_version_ref_override.sql": "select * from {{ test.ref('package', 'versioned_model', version=1) }}",
             "versioned_model_v1.sql": models__v1_sql,
             "versioned_model_v2.sql": models__v2_sql,
             "model.sql": models__v1_sql,
@@ -134,12 +143,27 @@ class TestAdvancedRefOverride:
     ):
         run_dbt(["run"])
 
-        # We want versioned_ref_override to equal to versioned_model_v2, otherwise the
-        # ref override macro has not worked
-        check_relations_equal(project.adapter, ["version_ref_override", "versioned_model_v2"])
-
+        # The built-in respects version=1 and the real package name instead of
+        # allowing a same-name macro to rewrite them to another target.
+        check_relations_equal(
+            project.adapter,
+            [
+                "version_ref_override",
+                "package_version_ref_override",
+                "builtin_version_ref",
+                "versioned_model_v1",
+            ],
+        )
         check_relations_equal(project.adapter, ["package_ref_override", "versioned_model_v2"])
 
+        # Explicit package-qualified macro calls retain the custom v1 -> v2 and
+        # package -> test rewriting, including their internal builtins.ref calls.
         check_relations_equal(
-            project.adapter, ["package_version_ref_override", "versioned_model_v2"]
+            project.adapter,
+            [
+                "explicit_version_ref_override",
+                "explicit_package_ref_override",
+                "explicit_package_version_ref_override",
+                "versioned_model_v2",
+            ],
         )

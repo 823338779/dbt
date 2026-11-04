@@ -1,11 +1,12 @@
-from typing import Any, Dict, Union
+from functools import partial
+from typing import Any, Callable, Dict, Union
 
 from dbt.config.runtime import RuntimeConfig
-from dbt.context.base import contextmember
+from dbt.context.base import contextproperty
 from dbt.context.configured import SchemaYamlContext
+from dbt.context.static_functions.doc import resolve_doc
 from dbt.contracts.graph.manifest import Manifest
 from dbt.contracts.graph.nodes import Macro, ResultNode
-from dbt.exceptions import DocArgsError, DocTargetNotFoundError
 
 
 class DocsRuntimeContext(SchemaYamlContext):
@@ -20,8 +21,8 @@ class DocsRuntimeContext(SchemaYamlContext):
         self.node = node
         self.manifest = manifest
 
-    @contextmember()
-    def doc(self, *args: str) -> str:
+    @contextproperty()
+    def doc(self) -> Callable:
         """The `doc` function is used to reference docs blocks in schema.yml
         files. It is analogous to the `ref` function. For more information,
         consult the Documentation guide.
@@ -41,34 +42,7 @@ class DocsRuntimeContext(SchemaYamlContext):
                   - name: orders
                     description: "{{ doc('orders') }}"
         """
-        # when you call doc(), this is what happens at runtime
-        if len(args) == 1:
-            doc_package_name = None
-            doc_name = args[0]
-        elif len(args) == 2:
-            doc_package_name, doc_name = args
-        else:
-            raise DocArgsError(self.node, args)
-
-        # Documentation
-        target_doc = self.manifest.resolve_doc(
-            doc_name,
-            doc_package_name,
-            self._project_name,
-            self.node.package_name,
-        )
-        if target_doc:
-            file_id = target_doc.file_id
-            if file_id in self.manifest.files:
-                source_file = self.manifest.files[file_id]
-                # TODO CT-211
-                source_file.add_node(self.node.unique_id)  # type: ignore[union-attr]
-        else:
-            raise DocTargetNotFoundError(
-                node=self.node, target_doc_name=doc_name, target_doc_package=doc_package_name
-            )
-
-        return target_doc.block_contents
+        return partial(resolve_doc, self)
 
 
 def generate_runtime_docs_context(

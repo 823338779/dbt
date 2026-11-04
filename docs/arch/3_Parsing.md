@@ -94,6 +94,42 @@ See `docs/guides/parsing-vs-compilation-vs-runtime.md` for a detailed explanatio
 - **Compilation** — Render Jinja with `execute=True`, run introspective queries (requiring an adapter / warehouse connection), populate `compiled_code`. Happens at runtime, in DAG order.
 - **Runtime** — Execute materializations, run tests, apply DDL/DML to the database.
 
+## Static Jinja Context Functions
+
+The initial static-function implementation covers `ref()` and `doc()` only.
+Their Python entry points live in `core/dbt/context/static_functions/`, one
+function per module. Context providers use `functools.partial` to bind the
+current resolver or docs context before exposing these callables to Jinja.
+They are not generated from macro text. Jinja expressions and control flow
+(`if`, `for`, and variables) continue to execute normally.
+
+- `resolve_ref()` handles call arguments and invokes the existing resolver's
+  validation and resolution methods. Parse-time dependency recording and
+  runtime Relation creation, access checks, ephemeral CTEs, operation behavior,
+  and unit-test behavior stay with their existing resolver classes.
+- `resolve_doc()` resolves the documentation block, records the consuming node
+  on its source file for partial parsing, and returns the block contents.
+
+The top-level `ref` and `builtins.ref` use the Python implementation even when a
+project defines a macro named `ref`. This intentionally changes compatibility
+for projects that previously used a top-level `ref` macro override. The macro
+is still callable explicitly as `package_name.ref(...)`. All other macro
+loading, lookup, overrides, and execution remain unchanged; this prototype does
+not remove the general macro system.
+
+When upgrading from the previous implementation, run `dbt build
+--no-partial-parse` once (or use `dbt parse --no-partial-parse` before the next
+build). The package version is unchanged, so an existing
+`target/partial_parse.msgpack` may otherwise retain dependencies rewritten by
+an old top-level `ref` macro and cause a dependency-inference compilation error.
+The full parse regenerates the cache using the new ref behavior; subsequent
+invocations can use normal partial parsing. Reusing an older cache across this
+change is not supported.
+
+Standalone YAML semantic model and exposure contexts retain their specialized
+ref resolvers and validation. No semantic model schema, Manifest field, or
+Relation representation changes are introduced here.
+
 ## Partial Parsing
 
 To improve performance on subsequent invocations, dbt can reuse the previous manifest and only re-parse files that have changed. This is controlled by the `--partial-parse` flag (enabled by default). See [Partial Parsing](3.1_Partial_Parsing.md)

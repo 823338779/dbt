@@ -2,6 +2,7 @@ import abc
 import csv
 import os
 from copy import deepcopy
+from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -59,6 +60,7 @@ from dbt.context.exceptions_jinja import wrapped_exports
 from dbt.context.macro_resolver import MacroResolver, TestMacroNamespace
 from dbt.context.macros import MacroNamespace, MacroNamespaceBuilder
 from dbt.context.manifest import ManifestContext
+from dbt.context.static_functions.ref import resolve_ref
 from dbt.contracts.graph.manifest import Disabled, Manifest
 from dbt.contracts.graph.metrics import MetricReference, ResolvedMetricReference
 from dbt.contracts.graph.nodes import (
@@ -393,20 +395,7 @@ class BaseRefResolver(BaseResolver):
             )
 
     def __call__(self, *args: str, **kwargs) -> RelationProxy:
-        name: str
-        package: Optional[str] = None
-        version: Optional[NodeVersion] = None
-
-        if len(args) == 1:
-            name = args[0]
-        elif len(args) == 2:
-            package, name = args
-        else:
-            raise RefArgsError(node=self.model, args=args)
-
-        version = kwargs.get("version") or kwargs.get("v")
-        self.validate_args(name, package, version)
-        return self.resolve(name, package, version)
+        return resolve_ref(self, *args, **kwargs)
 
 
 class BaseSourceResolver(BaseResolver):
@@ -1379,7 +1368,8 @@ class ProviderContext(ManifestContext):
 
             select * from {{ ref('package_name', 'model_name') }}"
         """
-        return self.provider.ref(self.db_wrapper, self.model, self.config, self.manifest)
+        resolver = self.provider.ref(self.db_wrapper, self.model, self.config, self.manifest)
+        return partial(resolve_ref, resolver)
 
     @contextproperty()
     def source(self) -> Callable:
